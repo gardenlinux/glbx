@@ -28,3 +28,4 @@ type FsContext interface {
 
 // Compile-time check that BaseFsContext satisfies FsContext.
 var _ FsContext = (*BaseFsContext)(nil)
+var _ FsContext = (*RemoteExecEnv)(nil)
