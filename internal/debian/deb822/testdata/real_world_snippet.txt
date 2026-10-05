@@ -1,0 +1,30 @@
+Package: apt
+Version: 2.6.1
+Architecture: amd64
+Maintainer: APT Development Team <deity@lists.debian.org>
+Installed-Size: 4321
+Depends: adduser, gpgv | gpgv2 | gpgv1, libapt-pkg6.0 (>= 2.6.1), debian-archive-keyring, libc6 (>= 2.34), libgcc-s1 (>= 3.3.1), libgnutls30 (>= 3.7.2), libseccomp2 (>= 2.4.2), libstdc++6 (>= 12), libsystemd0
+Priority: required
+Section: admin
+Filename: pool/main/a/apt/apt_2.6.1_amd64.deb
+Size: 1528444
+SHA256: abc123def456
+Description: commandline package manager
+ This package provides commandline tools for searching and
+ managing as well as querying information about packages
+ as a low-level access to all features of the libapt-pkg library.
+ .
+ These include:
+  * apt-get for retrieval of packages and information about them
+  * apt-cache for querying available information about installed
+    and installable packages
+  * apt-cdrom to use removable media as a package source
+
+Package: bash
+Version: 5.2.15-2
+Architecture: amd64
+Depends: base-files (>= 2.1.12), debianutils (>= 2.15)
+Pre-Depends: libc6 (>= 2.36), libtinfo6 (>= 6)
+Description: GNU Bourne Again SHell
+ Bash is an sh-compatible command language interpreter that executes
+ commands read from the standard input or from a file.
