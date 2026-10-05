@@ -101,27 +101,47 @@ cadence, a vendored library, a separately maintained submodule — while each
 piece keeps its own identity. `sources.yml` therefore pins a *list* of archives;
 a package with a single orig is just the one-entry case.
 
-Each `sources.yml` entry carries, for one archive:
+`sources.yml` is explicit YAML: a list of archives, each pinned by content hash
+with an ordered set of locations to fetch it from on a cache miss:
 
-- its filename (which encodes the component, if any),
-- its authoritative SHA-256,
-- a list of **retrieval locations**, in order of preference.
+```yaml
+sources:
+  - file: <pkg>_<version>.orig.tar.xz
+    sha256: <exact-tarball-sha256>
+    urls:
+      - <debian-archive-url>
+      - <debian-snapshot-url>
+  - file: <pkg>_<version>.orig-docs.tar.xz
+    sha256: <different-exact-tarball-sha256>
+    urls:
+      - <debian-archive-url>
+      - <debian-snapshot-url>
+```
 
-The hash is the identity; the locations only say where a builder *obtains* those
+Each entry carries, for one archive:
+
+- its **`file`** name, which encodes the component (if any) through the
+  `.orig-<component>.tar.*` convention — the main orig has no component suffix,
+- its authoritative **`sha256`**,
+- an ordered list of **`urls`**, the retrieval locations in order of preference.
+
+The hash is the identity; the URLs only say where a builder *obtains* those
 bytes. Bytes that do not match the hash are rejected — a retrieval location
-cannot override the pin. In normal operation the locations are almost never
-touched: an archive is fetched once, cached in the object store, and read from
-there by hash on every build afterward, reaching no external service. The
-locations serve the cold case where the store is empty and an archive must be
-reconstructed from scratch. The conventional order follows from that: the
-current Debian archive first, fast while the version is current, then a Debian
-snapshot URL as the durable fallback that keeps old versions long after they
-leave the live archive. Because the snapshot is only ever hit on this cold path,
-its slow performance is an acceptable price for always having a way back.
+cannot override the pin. In normal operation the URLs are almost never touched:
+an archive is fetched once, cached in the object store, and read from there by
+hash on every build afterward, reaching no external service. They serve the cold
+case where the store is empty and an archive must be reconstructed from scratch.
+The conventional order follows from that: the current Debian archive first, fast
+while the version is current, then a Debian snapshot URL as the durable fallback
+that keeps old versions long after they leave the live archive. Because the
+snapshot is only ever hit on this cold path, its slow performance is an
+acceptable price for always having a way back.
 
-> The precise `sources.yml` schema is defined in its own document; here it is
-> enough that it pins a list of archives, each by hash with ordered retrieval
-> locations.
+The schema mirrors the `files` arrays in the build-input pins on the integration
+side ([ARCHITECTURE.md](./ARCHITECTURE.md) §5): the same `sha256` + ordered
+`urls` shape for a pinned, content-addressed input, so both read alike. The
+difference is only what varies per entry — upstream archives split by *component*
+rather than by architecture, as orig tarballs are architecture-independent.
 
 ### `3.0 (native)` — the self-contained case
 
