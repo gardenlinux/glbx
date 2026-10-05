@@ -1,0 +1,15 @@
+Package: foo
+Version: 1.1-1
+Architecture: amd64
+Priority: optional
+Filename: pool/main/f/foo/foo_1.1-1_amd64.deb
+Size: 1100
+SHA256: cccc
+
+Package: baz
+Version: 3.0-1
+Architecture: amd64
+Priority: required
+Filename: pool/main/b/baz/baz_3.0-1_amd64.deb
+Size: 3000
+SHA256: dddd

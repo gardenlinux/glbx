@@ -1,0 +1,42 @@
+Package: coreutils
+Version: 9.1-1
+Architecture: amd64
+Essential: yes
+Priority: required
+Depends: libc6 (>= 2.34), libselinux1 (>= 3.1~)
+Pre-Depends: libacl1 (>= 2.2.23)
+Conflicts: timeout
+Provides: textutils, shellutils, fileutils
+Filename: pool/main/c/coreutils/coreutils_9.1-1_amd64.deb
+Size: 8123456
+SHA256: abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890
+
+Package: libc6
+Version: 2.36-9
+Architecture: amd64
+Priority: required
+Depends: libgcc-s1
+Provides: libc6-amd64 (= 2.36-9)
+Filename: pool/main/g/glibc/libc6_2.36-9_amd64.deb
+Size: 2934567
+SHA256: fedcba0987654321fedcba0987654321fedcba0987654321fedcba0987654321
+
+Package: bash
+Version: 5.2-2
+Architecture: amd64
+Priority: important
+Depends: libc6 (>= 2.34), libtinfo6 (>= 6)
+Pre-Depends: libc6 (>= 2.34)
+Breaks: bash-completion (<< 1:2.1-4.1~)
+Filename: pool/main/b/bash/bash_5.2-2_amd64.deb
+Size: 1456789
+SHA256: 1111111111111111111111111111111111111111111111111111111111111111
+
+Package: virtual-provider
+Version: 1.0-1
+Architecture: amd64
+Priority: optional
+Provides: mail-transport-agent, smtp-server (= 2.0)
+Filename: pool/main/v/virtual-provider/virtual-provider_1.0-1_amd64.deb
+Size: 12345
+SHA256: 2222222222222222222222222222222222222222222222222222222222222222
