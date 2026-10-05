@@ -4,6 +4,10 @@
 # binaries from here rather than rebuilding via `go build`.
 BIN_DIR := $(CURDIR)/bin
 
+# Pin to the installed toolchain so the module's go directive never triggers a
+# toolchain download mid-build.
+export GOTOOLCHAIN := local
+
 all: fmt vet build
 
 # `build` is phony so `go build` runs unconditionally — Go's own build cache
