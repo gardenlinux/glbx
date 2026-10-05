@@ -25,6 +25,10 @@ type BuildYML struct {
 	// RuntimeDepends maps an output binary name to the other locally built
 	// binaries ("<source>:<binary>") that belong in its runtime closure.
 	RuntimeDepends map[string][]string `yaml:"runtime_depends"`
+	// LockfileDeps maps an output binary name to external package names
+	// tolerated in that binary's validation: dependencies satisfied from the
+	// pinned tooling rather than locally built. Per-binary and not inherited.
+	LockfileDeps map[string][]string `yaml:"lockfile_deps"`
 }
 
 // LoadBuildYML reads build.yml from a package directory, returning the zero

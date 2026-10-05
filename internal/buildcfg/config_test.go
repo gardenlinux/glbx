@@ -27,6 +27,8 @@ build_depends: [glibc:libc6-dev, attr:libattr1-dev]
 runtime_depends:
   libc6: [gcc-16:libgcc-s1, glibc:libc-gconv-modules-extra]
   libfoo: [bar:baz]
+lockfile_deps:
+  libc6: [linux-libc-dev, rpcsvc-proto]
 `)
 	cfg, err := LoadBuildYML(dir)
 	if err != nil {
@@ -46,6 +48,9 @@ runtime_depends:
 	}
 	if len(cfg.RuntimeDepends["libc6"]) != 2 {
 		t.Fatalf("RuntimeDepends.libc6: %v", cfg.RuntimeDepends["libc6"])
+	}
+	if len(cfg.LockfileDeps["libc6"]) != 2 || cfg.LockfileDeps["libc6"][0] != "linux-libc-dev" {
+		t.Fatalf("LockfileDeps.libc6: %v", cfg.LockfileDeps["libc6"])
 	}
 }
 

@@ -33,6 +33,27 @@ type debMount struct {
 func Bootstrap(ctx context.Context, mountNS *container.MountNS, store *objstore.Store, idx *index.Index, arch string, stubPath string) (*container.Container, string, func(), error) {
 	l := log.From(ctx, log.Build)
 
+	var coreNames []string
+	for _, pkg := range idx.EssentialPackages() {
+		coreNames = append(coreNames, pkg.Name)
+	}
+	l.Info("resolving %d essential packages", len(coreNames))
+	corePkgs, err := Resolve(idx, arch, coreNames)
+	if err != nil {
+		return nil, "", nil, fmt.Errorf("resolve core: %w", err)
+	}
+	l.Info("resolved to %d packages (with transitive deps)", len(corePkgs))
+
+	return BootstrapResolved(ctx, mountNS, store, corePkgs, stubPath)
+}
+
+// BootstrapResolved builds a container whose base is exactly pkgs: it extracts
+// every package with dpkg-deb, sets up the dpkg database, creates the container,
+// and runs the two-phase dpkg install. Use it when the base set is already
+// resolved (e.g. from pinned tooling that carries no Essential metadata).
+func BootstrapResolved(ctx context.Context, mountNS *container.MountNS, store *objstore.Store, pkgs []*index.Package, stubPath string) (*container.Container, string, func(), error) {
+	l := log.From(ctx, log.Build)
+
 	devNull, err := os.Open(os.DevNull)
 	if err != nil {
 		return nil, "", nil, fmt.Errorf("open devnull: %w", err)
@@ -53,20 +74,8 @@ func Bootstrap(ctx context.Context, mountNS *container.MountNS, store *objstore.
 		return nil, "", nil, fmt.Errorf("mkdir rootfs: %w", err)
 	}
 
-	// 2. Resolve essential packages
-	var coreNames []string
-	for _, pkg := range idx.EssentialPackages() {
-		coreNames = append(coreNames, pkg.Name)
-	}
-
-	l.Info("resolving %d essential packages", len(coreNames))
-	corePkgs, err := Resolve(idx, arch, coreNames)
-	if err != nil {
-		return nil, "", nil, fmt.Errorf("resolve core: %w", err)
-	}
-	l.Info("resolved to %d packages (with transitive deps)", len(corePkgs))
-
-	// 3. Extract each package via dpkg-deb --extract (alphabetical order)
+	// 2. Extract each package via dpkg-deb --extract (alphabetical order)
+	corePkgs := append([]*index.Package{}, pkgs...)
 	sort.Slice(corePkgs, func(i, j int) bool {
 		return corePkgs[i].Name < corePkgs[j].Name
 	})
@@ -97,12 +106,12 @@ func Bootstrap(ctx context.Context, mountNS *container.MountNS, store *objstore.
 		}
 	}
 
-	// 4. Setup dpkg infrastructure directories
+	// 3. Setup dpkg infrastructure directories
 	if err := setupDpkgDirs(mountNS, rootfsPath); err != nil {
 		return nil, "", nil, fmt.Errorf("setup dpkg dirs: %w", err)
 	}
 
-	// 5. Make rootfs a shared mount point so mounts propagate into Container
+	// 4. Make rootfs a shared mount point so mounts propagate into Container
 	//    (Container uses MS_SLAVE, so parent→child propagation works)
 	if err := mountNS.Mount(rootfsPath, rootfsPath, "", syscall.MS_BIND, ""); err != nil {
 		return nil, "", nil, fmt.Errorf("bind rootfs: %w", err)
@@ -111,7 +120,7 @@ func Bootstrap(ctx context.Context, mountNS *container.MountNS, store *objstore.
 		return nil, "", nil, fmt.Errorf("make rootfs shared: %w", err)
 	}
 
-	// 6. Create container
+	// 5. Create container
 	cont, err := container.NewContainer(container.ContainerConfig{
 		Ctx:      ctx,
 		Parent:   mountNS,
@@ -126,7 +135,7 @@ func Bootstrap(ctx context.Context, mountNS *container.MountNS, store *objstore.
 		cont.Close()
 	}
 
-	// 7. Install essential packages via InstallResolved (unpack + configure)
+	// 6. Install the base set (unpack + configure)
 	if err := InstallResolved(ctx, cont, mountNS, store, rootfsPath, corePkgs); err != nil {
 		return cont, rootfsPath, cleanup, fmt.Errorf("install essential packages: %w", err)
 	}
