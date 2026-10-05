@@ -1,0 +1,14 @@
+build_profiles: [nocheck, noudeb]
+build_options: [nocheck]
+build_depends:
+  - glibc:libc6-dev
+  - zlib:zlib1g-dev
+  - libzstd:libzstd-dev
+  - libselinux:libselinux-dev
+  - bzip2:libbz2-dev
+  - xz-utils:liblzma-dev
+  - libmd:libmd-dev
+runtime_depends:
+  dpkg: [tar:tar]
+lockfile_deps:
+  dpkg: [libgcc-s1]

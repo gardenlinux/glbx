@@ -1,4 +1,4 @@
-.PHONY: all build build_demo fmt vet test clean
+.PHONY: all build build_demo fmt vet test e2e clean
 
 # bin/ is the canonical build output. Tests and the e2e driver consume the
 # binaries from here rather than rebuilding via `go build`.
@@ -35,6 +35,12 @@ vet:
 # result cache so every package is exercised end-to-end.
 test: build
 	GLBX_EXEC_ENV_STUB=$(STUB_BIN) GLBX_BIN=$(GLBX_BIN) go test -count=1 ./...
+
+# End-to-end acceptance test: build an image from source and smoke-test it.
+# Consumes the pre-built binaries; needs network, unprivileged user namespaces,
+# and ample disk/tmpfs.
+e2e: build
+	GLBX_BIN=$(GLBX_BIN) GLBX_EXEC_ENV_STUB=$(STUB_BIN) tests/full_build_test.sh
 
 clean:
 	rm -rf $(BIN_DIR)

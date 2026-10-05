@@ -1,0 +1,8 @@
+build_profiles: [nocheck, noudeb, nopython]
+build_options: [nocheck]
+build_depends: [glibc:libc6-dev, pcre2:libpcre2-dev]
+runtime_depends:
+  libselinux-dev: [libselinux:libselinux1]
+lockfile_deps:
+  libselinux1: [libgcc-s1]
+  libselinux-dev: [libsepol-dev, libgcc-s1, linux-libc-dev, rpcsvc-proto]

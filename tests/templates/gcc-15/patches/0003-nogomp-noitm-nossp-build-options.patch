@@ -1,0 +1,41 @@
+Subject: Honour `nogomp`, `noitm`, `nossp` in DEB_BUILD_OPTIONS.
+
+Upstream wires `with_gomp`/`with_itm`/`with_ssp` through `envfilt`, which
+only consults `lang=`/`nolang=`/`WITHOUT_LANG`. The bare top-level words
+`nogomp`/`noitm`/`nossp` in DEB_BUILD_OPTIONS are silently ignored. Add
+`findstring` checks (matching the `nostrap`/`nopgo`/`nojit` style) so a
+template can disable libgomp, libitm, and libssp without having to invent
+a new env var.
+
+--- a/debian/rules.defs
++++ b/debian/rules.defs
+@@ -1467,6 +1467,9 @@
+   with_ssp := not available on $(DEB_TARGET_ARCH)
+ endif
+ with_ssp := $(call envfilt, ssp, , , $(with_ssp))
++ifneq (,$(findstring nossp, $(DEB_BUILD_OPTIONS)))
++  with_ssp :=
++endif
+
+ ifeq ($(with_ssp),yes)
+   ifneq ($(derivative),Debian)
+@@ -1483,6 +1486,9 @@
+ ifneq (,$(filter $(DEB_TARGET_ARCH),$(gomp_no_archs)))
+   with_gomp :=
+ endif
++ifneq (,$(findstring nogomp, $(DEB_BUILD_OPTIONS)))
++  with_gomp :=
++endif
+
+ # itm --------------------
+ itm_archs = alpha amd64 arm64 i386 x32 loong64 ppc64 ppc64el riscv64 s390x sh4 sparc64
+@@ -1490,6 +1496,9 @@
+   with_itm := yes
+ endif
+ with_itm := $(call envfilt, itm, , , $(with_itm))
++ifneq (,$(findstring noitm, $(DEB_BUILD_OPTIONS)))
++  with_itm :=
++endif
+
+ # atomic --------------------
+ with_atomic := yes

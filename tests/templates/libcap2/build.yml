@@ -1,0 +1,9 @@
+build_profiles: [nocheck, noudeb]
+build_options: [nocheck]
+build_depends: [glibc:libc6-dev]
+runtime_depends:
+  libcap-dev: [libcap2:libcap2]
+lockfile_deps:
+  libcap2: [libgcc-s1]
+  libcap-dev: [libgcc-s1, linux-libc-dev, rpcsvc-proto]
+  libcap2-bin: [libgcc-s1]

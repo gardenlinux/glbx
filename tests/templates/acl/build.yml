@@ -1,0 +1,9 @@
+build_profiles: [nocheck, noudeb]
+build_options: [nocheck]
+build_depends: [glibc:libc6-dev, attr:libattr1-dev]
+runtime_depends:
+  libacl1-dev: [acl:libacl1]
+lockfile_deps:
+  acl: [libgcc-s1]
+  libacl1: [libgcc-s1]
+  libacl1-dev: [libgcc-s1, linux-libc-dev, rpcsvc-proto]

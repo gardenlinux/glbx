@@ -1,0 +1,5 @@
+build_profiles: [nocheck, noudeb]
+build_options: [nocheck]
+build_depends: [glibc:libc6-dev, ncurses:libncurses-dev, base-files:base-files, debianutils:debianutils]
+lockfile_deps:
+  bash: [libgcc-s1]

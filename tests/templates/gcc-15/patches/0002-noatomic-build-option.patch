@@ -1,0 +1,22 @@
+Subject: Honour `noatomic` in DEB_BUILD_OPTIONS to skip building libatomic.
+
+Mirror the existing `nogomp`/`noitm`/`nossp` envfilt knobs for libatomic,
+which has no upstream toggle. With `noatomic` set, `with_atomic` is cleared
+and `rules2:399` adds `--disable-libatomic` to CONFARGS, so libatomic isn't
+compiled or packaged. Safe for rootfs source sets that don't link against
+`-latomic`; failures (if any) surface as a clear `cannot find -latomic`
+link error in downstream packages and are recoverable by rebuilding gcc
+without the option.
+
+--- a/debian/rules.defs
++++ b/debian/rules.defs
+@@ -1497,6 +1497,9 @@ atomic_no_archs =
+ ifneq (,$(filter $(DEB_TARGET_ARCH),$(atomic_no_archs)))
+   with_atomic :=
+ endif
++ifneq (,$(findstring noatomic, $(DEB_BUILD_OPTIONS)))
++  with_atomic :=
++endif
+
+ # backtrace --------------------
+ with_backtrace := yes

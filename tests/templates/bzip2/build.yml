@@ -1,0 +1,10 @@
+build_profiles: [nocheck, noudeb]
+build_options: [nocheck]
+build_depends: [glibc:libc6-dev]
+runtime_depends:
+  libbz2-dev: [bzip2:libbz2-1.0, bzip2:bzip2]
+  bzip2: [bzip2:libbz2-1.0]
+lockfile_deps:
+  bzip2: [libgcc-s1]
+  libbz2-1.0: [libgcc-s1]
+  libbz2-dev: [libgcc-s1, linux-libc-dev, rpcsvc-proto]

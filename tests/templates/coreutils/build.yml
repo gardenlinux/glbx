@@ -1,0 +1,5 @@
+build_profiles: [nocheck, noudeb]
+build_options: [nocheck]
+build_depends: [glibc:libc6-dev, attr:libattr1-dev, acl:libacl1-dev, libselinux:libselinux-dev, gmp:libgmp3-dev, openssl:libssl-dev, systemd:libsystemd-dev]
+lockfile_deps:
+  coreutils: [libgcc-s1]

@@ -1,0 +1,8 @@
+build_profiles: [nocheck, noudeb, stage1, noinsttest, nodoc]
+build_options: [nocheck]
+build_depends: [glibc:libc6-dev, libcap2:libcap-dev, libselinux:libselinux-dev, acl:libacl1-dev, libzstd:libzstd-dev]
+runtime_depends:
+  libsystemd-dev: [systemd:libsystemd0]
+lockfile_deps:
+  libsystemd0: [libgcc-s1]
+  libsystemd-dev: [libgcc-s1, linux-libc-dev, rpcsvc-proto]

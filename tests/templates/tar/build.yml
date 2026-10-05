@@ -1,0 +1,5 @@
+build_profiles: [nocheck, noudeb]
+build_options: [nocheck]
+build_depends: [glibc:libc6-dev, acl:libacl1-dev, libselinux:libselinux-dev]
+lockfile_deps:
+  tar: [libgcc-s1]
