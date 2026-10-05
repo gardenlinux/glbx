@@ -24,6 +24,8 @@ func main() {
 		err = cmdLockfile(args)
 	case "lockfile-rootfs":
 		err = cmdLockfileRootfs(args)
+	case "exec-chroot":
+		err = cmdExecChroot(args)
 	case "help", "--help", "-h":
 		usage()
 		return
@@ -43,5 +45,5 @@ func main() {
 
 func usage() {
 	fmt.Fprintln(os.Stderr, "usage: glbx <command> [arguments]")
-	fmt.Fprintln(os.Stderr, "commands: import, lockfile, lockfile-rootfs")
+	fmt.Fprintln(os.Stderr, "commands: import, lockfile, lockfile-rootfs, exec-chroot")
 }
