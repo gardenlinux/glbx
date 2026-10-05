@@ -20,6 +20,10 @@ func main() {
 	switch cmd {
 	case "import":
 		err = cmdImport(args)
+	case "lockfile":
+		err = cmdLockfile(args)
+	case "lockfile-rootfs":
+		err = cmdLockfileRootfs(args)
 	case "help", "--help", "-h":
 		usage()
 		return
@@ -39,5 +43,5 @@ func main() {
 
 func usage() {
 	fmt.Fprintln(os.Stderr, "usage: glbx <command> [arguments]")
-	fmt.Fprintln(os.Stderr, "commands: import")
+	fmt.Fprintln(os.Stderr, "commands: import, lockfile, lockfile-rootfs")
 }

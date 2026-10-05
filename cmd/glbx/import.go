@@ -6,7 +6,6 @@ import (
 
 	"github.com/gardenlinux/glbx/internal/importer"
 	"github.com/gardenlinux/glbx/internal/log"
-	"github.com/gardenlinux/glbx/internal/objstore"
 )
 
 func cmdImport(args []string) error {
@@ -25,11 +24,7 @@ func cmdImport(args []string) error {
 	}
 	pkgName := fs.Arg(0)
 
-	storeDir := *cacheDir
-	if storeDir == "" {
-		storeDir = objstore.DefaultRoot()
-	}
-	store, err := objstore.Open(storeDir)
+	store, err := openStore(*cacheDir)
 	if err != nil {
 		return fmt.Errorf("open store: %w", err)
 	}
