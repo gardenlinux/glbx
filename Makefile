@@ -1,4 +1,4 @@
-.PHONY: all build fmt vet test clean
+.PHONY: all build build_demo fmt vet test clean
 
 # bin/ is the canonical build output. Tests and the e2e driver consume the
 # binaries from here rather than rebuilding via `go build`.
@@ -15,6 +15,11 @@ all: fmt vet build
 build:
 	@mkdir -p $(BIN_DIR)
 	go build ./...
+
+# Demo binaries are not needed for tests; build them on demand.
+build_demo:
+	@mkdir -p $(BIN_DIR)
+	go build -o $(BIN_DIR)/taskdemo ./cmd/taskdemo
 
 fmt:
 	go fmt ./...
