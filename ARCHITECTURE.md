@@ -45,12 +45,15 @@ hash *is* the dependency ledger; no separate change-tracking database is needed.
 
 ### 3. The object store
 
-There is exactly one place where results persist: an **object store** made of
-two parts — a content-addressed store of immutable blobs, addressed by the hash
-of their bytes, and a map from artifact identities to the blobs they produced.
-Everything the system might want to keep — source archives, dependency
-lockfiles, built packages, assembled images — is a blob. This is the only
-durable state; everything else is derived and can be recomputed.
+There is exactly one place where results persist and are reused: an **object
+store** made of two parts — a content-addressed store of immutable blobs,
+addressed by the hash of their bytes, and a map from artifact identities to the
+blobs they produced. Everything the system might want to reuse — source
+archives, dependency lockfiles, built packages, assembled images — is a blob.
+The store is a **cache**, not a system of record: everything in it is either a
+build output that can be rebuilt or an external input that can be re-fetched from
+a recorded location, so anything it drops can be reproduced. The durable source
+of truth is git (see below); the store just saves the system from redoing work.
 
 The store is local to each machine, but it is also meant to have a shared remote
 form: artifacts built once in the CI pipeline can be pulled into a local store
