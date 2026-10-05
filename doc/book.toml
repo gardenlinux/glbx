@@ -1,0 +1,22 @@
+[book]
+authors = ["Garden Linux"]
+language = "en"
+src = "src"
+title = "Garden Linux Build eXecutor"
+description = "Architecture and implementation reference for glbx."
+
+[output.html]
+default-theme = "navy"
+preferred-dark-theme = "navy"
+no-section-label = false
+additional-js = ["mermaid.min.js", "mermaid-init.js"]
+
+[output.html.print]
+enable = true
+
+[output.html.fold]
+enable = true
+level = 2
+
+[preprocessor.mermaid]
+command = "mdbook-mermaid"

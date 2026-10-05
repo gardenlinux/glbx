@@ -1,7 +1,7 @@
 # Identity
 
 This document fixes how an artifact's **identity** is computed — the one value
-the architecture sketch ([ARCHITECTURE.md](./ARCHITECTURE.md) §2) and the
+the architecture sketch ([ARCHITECTURE.md](./architecture.md) §2) and the
 artifact model ([artifact-model.md](./artifact-model.md)) both lean on but
 deliberately leave abstract. Those documents establish *what* identity must be:
 a deterministic, collision-resistant value over an artifact's inputs and the
@@ -166,4 +166,4 @@ correct.
   consumes these identities: [artifact-model.md](./artifact-model.md).
 - Where source trees come from and how `3.0 (quilt)` splits committed `debian/`
   from object-store tarballs: [source-lineage.md](./source-lineage.md).
-- The high-level role of content-derived identity: [ARCHITECTURE.md](./ARCHITECTURE.md) §2.
+- The high-level role of content-derived identity: [ARCHITECTURE.md](./architecture.md) §2.

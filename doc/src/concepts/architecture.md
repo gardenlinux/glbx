@@ -1,7 +1,7 @@
 # Architecture Sketch
 
 This is a rough conceptual shape for glbx — enough to see how the goals in
-[VISION.md](./VISION.md) hold together, not yet a detailed design. Each piece
+[VISION.md](./vision.md) hold together, not yet a detailed design. Each piece
 named here is concretized on its own later; this sketch exists to show the
 skeleton and how the parts connect.
 

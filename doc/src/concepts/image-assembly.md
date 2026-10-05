@@ -9,7 +9,7 @@ and [exec-env.md](./exec-env.md) gives the sandbox whose split between a staging
 mount namespace and an inner pivoted run is what makes the layering trick below
 practical.
 
-The sketch ([ARCHITECTURE.md](./ARCHITECTURE.md) §6) states the shape in one
+The sketch ([ARCHITECTURE.md](./architecture.md) §6) states the shape in one
 breath: take the runtime closure of a chosen set of packages, install them into
 a fresh root filesystem, and pack the result deterministically — and this is
 the step where the from-source guarantee is enforced. This document fixes the
@@ -273,4 +273,4 @@ operation as every node beneath it is the whole point of the model.
   [artifact-model.md](./artifact-model.md).
 - The staging-vs-pivot split that lets inputs be mounted and the result packed
   from outside the chroot: [exec-env.md](./exec-env.md).
-- The high-level shape this fits into: [ARCHITECTURE.md](./ARCHITECTURE.md) §6.
+- The high-level shape this fits into: [ARCHITECTURE.md](./architecture.md) §6.

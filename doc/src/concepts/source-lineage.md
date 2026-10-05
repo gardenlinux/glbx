@@ -3,7 +3,7 @@
 This document describes the layout and git conventions of the **source
 repository** — the repository glbx builds *from*. It concretizes the source
 lineage introduced in the architecture sketch
-([ARCHITECTURE.md](./ARCHITECTURE.md) §"Source lineage").
+([ARCHITECTURE.md](./architecture.md) §"Source lineage").
 
 The source repository is distinct from glbx itself. glbx is the build executor;
 it carries no packages. The packages, their upstream history, and their
@@ -73,7 +73,7 @@ A pristine import commit records **only upstream source**: the content needed to
 reconstruct exactly what Debian shipped for that version. It holds no local
 patches, no integration configuration, and no build-time tooling pins — tooling
 pins are a resolution against a moving archive at a moment in time, so they live
-on the integration side ([ARCHITECTURE.md](./ARCHITECTURE.md) §5), not on the
+on the integration side ([ARCHITECTURE.md](./architecture.md) §5), not on the
 upstream chain.
 
 What the committed content looks like depends on the Debian source format. Two
@@ -138,7 +138,7 @@ snapshot is only ever hit on this cold path, its slow performance is an
 acceptable price for always having a way back.
 
 The schema mirrors the `files` arrays in the build-input pins on the integration
-side ([ARCHITECTURE.md](./ARCHITECTURE.md) §5): the same `sha256` + ordered
+side ([ARCHITECTURE.md](./architecture.md) §5): the same `sha256` + ordered
 `urls` shape for a pinned, content-addressed input, so both read alike. The
 difference is only what varies per entry — upstream archives split by *component*
 rather than by architecture, as orig tarballs are architecture-independent.

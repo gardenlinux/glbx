@@ -1,7 +1,7 @@
 # The Object Store
 
 The object store is where results persist between builds. The architecture
-sketch ([ARCHITECTURE.md](./ARCHITECTURE.md) §3) names it as the system's one
+sketch ([ARCHITECTURE.md](./architecture.md) §3) names it as the system's one
 place where anything is kept: everything the build might reuse — upstream
 archives, built `.deb`s, assembled images, the manifests that tie an artifact's
 outputs together — is a blob here, and everything else is derived from those.
@@ -305,4 +305,4 @@ free:
 - The external tooling `.deb`s recorded in `build-deps.yml` the same way:
   [package-build.md](./package-build.md).
 - The store's role as the system's cache of results and its intended remote
-  form: [ARCHITECTURE.md](./ARCHITECTURE.md) §3.
+  form: [ARCHITECTURE.md](./architecture.md) §3.

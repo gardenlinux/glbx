@@ -51,7 +51,7 @@ A source package's external build-time inputs are pinned in a
 not on the pristine lineage, since the pin is a resolution against a moving
 archive at a moment in time, not part of upstream source (see
 [source-lineage.md](./source-lineage.md) and
-[ARCHITECTURE.md](./ARCHITECTURE.md) §5). The pin is **per package**: each
+[ARCHITECTURE.md](./architecture.md) §5). The pin is **per package**: each
 package locks its own tooling, so bumping a tool one package needs does not
 force every other package to rebuild.
 
@@ -169,7 +169,7 @@ sandbox so that it sees only its declared inputs and leaves the host untouched.
 ### Assembling the build chroot
 
 The sandbox is built from Linux namespaces directly (user, mount, PID — see
-[ARCHITECTURE.md](./ARCHITECTURE.md) §4), with no external container runtime.
+[ARCHITECTURE.md](./architecture.md) §4), with no external container runtime.
 Into a private root filesystem the build assembles:
 
 1. **The build-time tooling.** For the target architecture, the relevant files
@@ -280,4 +280,4 @@ the maximum degree of parallelism.
 
 - Where the source comes from: [source-lineage.md](./source-lineage.md).
 - The artifact, identity, object-store, and sandbox concepts this builds on:
-  [ARCHITECTURE.md](./ARCHITECTURE.md).
+  [ARCHITECTURE.md](./architecture.md).

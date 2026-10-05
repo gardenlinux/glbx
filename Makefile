@@ -1,4 +1,4 @@
-.PHONY: all build build_demo fmt vet test e2e clean
+.PHONY: all build build_demo fmt vet test e2e doc clean
 
 # bin/ is the canonical build output. Tests and the e2e driver consume the
 # binaries from here rather than rebuilding via `go build`.
@@ -42,5 +42,9 @@ test: build
 e2e: build
 	GLBX_BIN=$(GLBX_BIN) GLBX_EXEC_ENV_STUB=$(STUB_BIN) tests/full_build_test.sh
 
+# Build the documentation book (requires mdbook + mdbook-mermaid).
+doc:
+	mdbook build doc
+
 clean:
-	rm -rf $(BIN_DIR)
+	rm -rf $(BIN_DIR) doc/book

@@ -2,7 +2,7 @@
 
 This document defines the one abstraction the whole build engine is built on:
 the **artifact**. The architecture sketch
-([ARCHITECTURE.md](./ARCHITECTURE.md) §1–§2) states the central idea — every
+([ARCHITECTURE.md](./architecture.md) §1–§2) states the central idea — every
 build output is an artifact with an identity derived from its inputs, looked up
 in a content-addressed store and either reused or built. [package-build.md](./package-build.md)
 already works in these terms, modelling a source build and a binary package as
@@ -182,7 +182,7 @@ artifact".
 
 ## See also
 
-- The high-level shape these pieces fit into: [ARCHITECTURE.md](./ARCHITECTURE.md).
+- The high-level shape these pieces fit into: [ARCHITECTURE.md](./architecture.md).
 - The source-build and binary-package artifacts, and their `build_depends` /
   `runtime_depends` edges, in concrete terms: [package-build.md](./package-build.md).
 - Where an artifact's source tree comes from: [source-lineage.md](./source-lineage.md).
