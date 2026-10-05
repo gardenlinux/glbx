@@ -1,0 +1,8 @@
+# Build outputs and ephemeral state.
+bin/
+doc/book/
+doc/.serve.pid
+doc/.serve.log
+
+# Go test binaries.
+*.test
