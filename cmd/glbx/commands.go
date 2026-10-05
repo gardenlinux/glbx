@@ -79,3 +79,18 @@ func cmdLockfileRootfs(args []string) error {
 	l.Info("generated %s (%s): %d packages", result.Path, result.Arch, result.Packages)
 	return nil
 }
+
+func cmdStatus(args []string) error {
+	_, l := rootContext(log.Engine)
+	store, err := openStore("")
+	if err != nil {
+		return err
+	}
+	l.Info("cache: %s", store.Root())
+	if confRoot := findConfDir(); confRoot != "" {
+		l.Info("working tree: %s", confRoot)
+	} else {
+		l.Info("working tree: not found from the current directory")
+	}
+	return nil
+}

@@ -42,3 +42,10 @@ func rootContext(c log.Component) (context.Context, *log.Logger) {
 	ctx := log.WithTarget(context.Background(), log.NewConsoleTarget())
 	return ctx, log.From(ctx, c)
 }
+
+// rootContextStderr is like rootContext but routes every level to stderr, for
+// commands whose stdout carries machine-parseable output (e.g. resolve).
+func rootContextStderr(c log.Component) (context.Context, *log.Logger) {
+	ctx := log.WithTarget(context.Background(), log.NewStderrConsoleTarget())
+	return ctx, log.From(ctx, c)
+}

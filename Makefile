@@ -34,7 +34,7 @@ vet:
 # skip with a clear message when it is unset. `-count=1` disables the test
 # result cache so every package is exercised end-to-end.
 test: build
-	GLBX_EXEC_ENV_STUB=$(STUB_BIN) go test -count=1 ./...
+	GLBX_EXEC_ENV_STUB=$(STUB_BIN) GLBX_BIN=$(GLBX_BIN) go test -count=1 ./...
 
 clean:
 	rm -rf $(BIN_DIR)

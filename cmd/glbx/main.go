@@ -26,6 +26,14 @@ func main() {
 		err = cmdLockfileRootfs(args)
 	case "build":
 		err = cmdBuild(args)
+	case "graph":
+		err = cmdGraph(args)
+	case "cache":
+		err = cmdCache(args)
+	case "resolve":
+		err = cmdResolve(args)
+	case "status":
+		err = cmdStatus(args)
 	case "exec-chroot":
 		err = cmdExecChroot(args)
 	case "help", "--help", "-h":
@@ -47,5 +55,5 @@ func main() {
 
 func usage() {
 	fmt.Fprintln(os.Stderr, "usage: glbx <command> [arguments]")
-	fmt.Fprintln(os.Stderr, "commands: import, lockfile, lockfile-rootfs, build, exec-chroot")
+	fmt.Fprintln(os.Stderr, "commands: import, lockfile, lockfile-rootfs, build, graph, cache, resolve, status, exec-chroot")
 }
