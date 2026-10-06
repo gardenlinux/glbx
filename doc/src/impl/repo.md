@@ -36,3 +36,13 @@ hash-verify every resolved `.deb` into the store (16 in parallel), and write the
 explicit per-architecture `build-deps.yml` — each tool recorded by name, exact
 version, and per file its architecture, content hash, and retrieval URLs.
 `GenerateRootfs` produces the image configuration-tooling lock in the same form.
+
+## `internal/restore`
+
+Fills a cold object store from the pins already recorded in the working tree.
+For every source archive in `sources.yml` and every tooling `.deb` in
+`build-deps.yml` for the target architecture, it checks whether the blob is
+present and, if not, fetches it from the recorded URLs in preference order,
+keeping the first whose bytes match the pinned hash. It is the read side of the
+pins the import and lock steps write: no index fetch or resolution, just a
+hash-verified download of what the tree already names.

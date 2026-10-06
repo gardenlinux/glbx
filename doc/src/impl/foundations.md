@@ -10,15 +10,16 @@ artifact's identity. `ConcatHash` folds an ordered tuple of parts into one hash
 by SHA-256'ing each part to a fixed 32-byte frame and hashing the concatenation,
 so the encoding is unambiguous and order-significant.
 
-The store is a directory of content-addressed `blobs/` and an identity→manifest
-`map/`, both sharded by the first two hex characters of the key. Blobs are
-written atomically (temp file, hash while writing, rename into place). A
-`Remote` interface defines a read-only pull-through backend: on a local miss the
-store fetches from the remote, writes the bytes locally (re-hashing to verify),
-and re-reads locally, so a caller always sees local data. Garbage collection
-takes a caller-supplied keep-set, sweeps blobs against it, then sweeps the map
-to follow the surviving blobs. The store protects nothing of its own — it is a
-pure cache.
+A local store is a directory of content-addressed `blobs/` and an
+identity→manifest `map/`, both sharded by the first two hex characters of the
+key. Blobs are written atomically (temp file, hash while writing, rename into
+place). A read-only `Remote` interface serves blobs and map entries by hash; a
+pull-through store composes a local store with a remote so that on a local miss
+it fetches from the remote, writes the bytes locally (re-hashing to verify), and
+re-reads locally — a caller always sees local data. Garbage collection takes a
+caller-supplied keep-set, sweeps blobs against it, then sweeps the map to follow
+the surviving blobs. The store protects nothing of its own — it is a pure
+cache.
 
 ## `internal/dirhash` — directory hashing
 
