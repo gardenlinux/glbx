@@ -54,7 +54,7 @@ consumes, which is what the edge records.
 ## The dependency edges
 
 An artifact can relate to another artifact in two ways, and they are genuinely
-different relationships — not two settings of one knob:
+different relationships:
 
 - **Depends** — "I am built from B."
 - **Includes** — "I carry B along for whoever uses me."
@@ -111,8 +111,8 @@ produces its own, by folding together two things:
   tree, target architecture, selected binary name, build profiles and options,
   and any pinned external bytes. The `build-deps.yml` tooling enters here, by
   content hash — it is leaf data, not an artifact in the graph. A locally built
-  binary, by contrast, *is* an artifact and so is reached by a Depends edge, not
-  inlined here;
+  binary *is* an artifact and so is reached by a Depends edge, entering identity
+  through the next part;
 - the **identities of its Depends dependencies** — and only those, since
   identity records what an artifact is built from (Includes carries no build
   input and can cycle).
@@ -127,13 +127,12 @@ graph from the leaves up before anything is built — the identity is known firs
 the result produced only on a cache miss. Second, the identity *is* the
 dependency ledger: a change to any leaf input changes that artifact's identity
 and, through the Depends graph, every artifact built from it, up to the image.
-No separate change-tracking database exists and there is no stale-cache failure
-mode — a cache hit is simply an identity already present in the store, and since
-the identity captures every input, the hit is exact.
+A cache hit is simply an identity already present in the store, and since the
+identity captures every input, the hit is exact.
 
 This is why a locally built input is "pinned by construction": its identity
 rolls up from its own source and inputs, so a Depends edge to it pins its exact
-bytes with no separate lockfile — hence [package-build.md](./package-build.md)
+bytes through the graph itself — hence [package-build.md](./package-build.md)
 pins only *external* `.deb`s in `build-deps.yml` and leaves locally built inputs
 to the graph.
 
@@ -152,8 +151,7 @@ Building any target is one general operation, the same for every artifact:
    building and touches no sandbox.
 2. **Consult the store.** For each artifact, a hit — its identity is present —
    means its result is already available and its subgraph need not be visited for
-   building at all. The store lookup is the whole of cache checking; there is no
-   separate validity test.
+   building at all. The store lookup is the whole of cache checking.
 3. **Build on a miss.** For an artifact whose identity is absent, first ensure
    the results it is built from are present — the artifacts reached by its
    Depends edges, plus, by the closure rule, everything those dependencies

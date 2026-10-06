@@ -164,21 +164,19 @@ there is no blob the registry cannot hold. This matters most for the blobs that
 belong to no artifact's output manifest: an upstream `orig.tar` or a tooling
 `.deb` referenced only by a `sources.yml` / `build-deps.yml` entry
 ([source-lineage.md](./source-lineage.md), [package-build.md](./package-build.md)).
-These are *inputs*, never listed among a build's outputs, so a scheme that only
-rooted output closures could not store them at all — and a registry that cannot
-serve a build's inputs is useless to a cold consumer. Here an input is a blob like
-any other: pushed under its content hash, tagged `blob/<hash>`, pulled back by
-hash. The registry is a **full content mirror**, able to serve every blob a build
-reads — inputs, intermediate manifests, and outputs alike — not merely a cache of
-finished outputs.
+These are *inputs*, never listed among a build's outputs, and a registry that
+could not serve a build's inputs would be useless to a cold consumer. Here an
+input is a blob like any other: pushed under its content hash, tagged
+`blob/<hash>`, pulled back by hash. The registry is a **full content mirror**,
+able to serve every blob a build reads — inputs, intermediate manifests, and
+outputs alike — not merely a cache of finished outputs.
 
-This holds without reintroducing pins ([object-store.md](./object-store.md)
-§On-disk layout). A pin is a *local* protection against GC; it has no analogue
-here because remote retention is per-blob tag, not a protected-root set. The git
-tree's `sources.yml` / `build-deps.yml` still record each input by hash and
-retrieval URL, so a cold machine with no registry — or a blob the registry happens
-not to have — still obtains inputs the pure-cache way: `restore-cache` fetches from
-the recorded URLs and verifies against the recorded hash. The registry mirror and
+Remote retention is per-blob: a blob is kept on the registry exactly while it
+has a tag, so there is no protected-root set to maintain. The git tree's
+`sources.yml` / `build-deps.yml` still record each input by hash and retrieval
+URL, so a cold machine with no registry — or a blob the registry happens not to
+have — still obtains inputs the pure-cache way: `restore-cache` fetches from the
+recorded URLs and verifies against the recorded hash. The registry mirror and
 the recorded URLs are two independent sources for the same content-addressed
 bytes; a consumer uses whichever answers, and either way the hash it got is the
 hash it asked for.

@@ -18,8 +18,9 @@ pull-through store composes a local store with a remote so that on a local miss
 it fetches from the remote, writes the bytes locally (re-hashing to verify), and
 re-reads locally — a caller always sees local data. Garbage collection takes a
 caller-supplied keep-set, sweeps blobs against it, then sweeps the map to follow
-the surviving blobs. The store protects nothing of its own — it is a pure
-cache.
+the surviving blobs. The store is a pure cache: everything in it is either a
+rebuildable output or a re-fetchable input, so the keep-set is the whole of what
+survives a collection.
 
 ## `internal/dirhash` — directory hashing
 

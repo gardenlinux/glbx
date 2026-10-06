@@ -86,20 +86,14 @@ the same content converge on the same final path harmlessly. A map entry is a
 one-line file written the same temp-then-rename way, so updating a key is atomic
 per key and there is no shared index to serialize on.
 
-There is no third directory, and in particular nothing that marks a blob as
-permanent. One might expect a store to need a set of *pins* — named roots that
-protect certain blobs (freshly fetched upstream archives, resolved tooling
-`.deb`s) from collection on the grounds that they are inputs nothing rebuilds.
-This store has none, and deliberately so: those inputs are not irreplaceable
-here. Each is recorded with its content hash **and** its retrieval locations in
-the git tree (`sources.yml`, `build-deps.yml`), so a collected input is simply
-re-fetched and re-verified on next use, exactly like a collected output is
-rebuilt. A pin would protect bytes on one machine's disk while guaranteeing
-nothing for any other machine, and it would be a standing leak — a root left
-behind by a long-ago build keeps bytes alive forever until someone remembers to
-remove it. Making the store a pure cache removes that failure mode outright: the
-only thing that keeps
-a blob is being wanted *now*.
+These two directories are the whole store; nothing in it is marked permanent.
+Every blob is reclaimable, because every input is recorded with its content hash
+**and** its retrieval locations in the git tree (`sources.yml`,
+`build-deps.yml`): a collected input is simply re-fetched and re-verified on next
+use, exactly like a collected output is rebuilt. Keeping the store a pure cache
+is what keeps it simple — the only thing that keeps a blob is being wanted *now*,
+so there is no permanent state on disk to protect and nothing a cleanup can lose
+for good.
 
 ## The store interface
 
@@ -235,11 +229,10 @@ graphs, and reachability — it knows only blobs, map entries, and the one set i
 was given.
 
 Because the store protects nothing of its own, the keep-set is the *entire*
-account of what survives a collection. There is no second category — no pinned
-roots, no permanent inputs — layered underneath it. A blob the engine does not
-place in the keep-set is reclaimed, and that is safe for every blob precisely
-because the store is a pure cache: a reclaimed output is rebuilt and a reclaimed
-input is re-fetched from its recorded source, both verified by hash. The engine
+account of what survives a collection. A blob the engine does not place in the
+keep-set is reclaimed, and that is safe for every blob precisely because the
+store is a pure cache: a reclaimed output is rebuilt and a reclaimed input is
+re-fetched from its recorded source, both verified by hash. The engine
 is free to compute a tight keep-set (only what the current graph needs) or a
 generous one (recently used artifacts too, as a cache-warmth policy) — that
 tradeoff lives in the engine, not the store.
@@ -277,17 +270,16 @@ free:
 
 - **Reproducibility is a lookup.** Because a map key is the content-derived
   identity and the identity captures every input exactly, a cache hit is an
-  identity already present — equivalent, not merely probable. There is no
-  stale-cache failure mode to guard against.
+  identity already present — equivalent, not merely probable, so the lookup is
+  the whole of the cache check.
 - **The remote is the same shape as the local.** A content-addressed tree maps
   onto an OCI registry's digest-addressed objects directly, so "pull by hash"
   needs no translation and the pulled bytes verify themselves. Sharing a store is
   distributing already-built outputs, never a precondition for building.
 - **Everything is reclaimable, so GC is just a cache eviction.** No blob is
   irreplaceable — outputs rebuild, inputs re-fetch from recorded sources — so
-  there is nothing to protect from collection, no roots to track, and no standing
-  leak from a protection left behind. Retention policy is the engine's to choose
-  and the store is a pure cache under it.
+  retention policy is the engine's to choose and the store is a pure cache under
+  it.
 - **GC is two set-sweeps.** Feeding the store a finished blob keep-set reduces
   collection to a membership test over blobs and a follow-the-blobs pass over the
   map — no graph walking inside the store, no way to leave the map inconsistent

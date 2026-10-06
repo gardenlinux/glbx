@@ -30,5 +30,5 @@ The sandbox helper — see [Execution environment](./exec-env.md).
 
 ## `cmd/taskdemo`
 
-A standalone binary that drives the full progress UI with synthetic tasks — the
-UI's end-to-end exercise, with no engine behind it.
+A standalone binary that drives the full progress UI with synthetic tasks,
+exercising the UI end to end on its own.

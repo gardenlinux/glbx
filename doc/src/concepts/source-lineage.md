@@ -35,33 +35,28 @@ one per imported upstream version, where each import has the previous import of
 root — it begins a fresh history of its own. A package's upstream history stands
 alone and joins an integration branch only through merges.
 
-A lineage carries no reserved branch name; identity lives in the commits. Each
-pristine commit records in its message a machine-readable **import marker**
-carrying two facts:
+A lineage's identity lives in its commits. Each pristine commit records in its
+message a machine-readable **import marker** carrying two facts:
 
 - the *package* it belongs to,
 - the *exact upstream version* it records.
 
-Keeping identity in the commits rather than in a long-lived tracking branch per
-package buys two things. First, it removes a class of mistakes: a tracking
-branch is mutable shared state that can drift or be corrupted by a careless
-operation — a merge in the wrong direction, a force-push, a stale local copy —
-and the lineage would then be wrong even though every commit was fine. A marker
-baked into the commit cannot be knocked out of place this way; the history
-itself is the record, and it is read the same whatever branches happen to point
-where. Second, it keeps adding a package to a single step: a new package arrives
-as one pull request that introduces its first import and merges it, with no
-prior setup of a dedicated branch to be created and maintained before the work
-can land.
+Keeping identity in the commits buys two things. First, it removes a class of
+mistakes: the history itself is the record, baked into each commit's marker, so
+it is read the same whatever branches happen to point where, and no mutable
+pointer can drift or be corrupted out from under the lineage while every commit
+stays individually fine. Second, it keeps adding a package to a single step: a
+new package arrives as one pull request that introduces its first import and
+merges it, with no setup to do before the work can land.
 
 To find a package's current upstream baseline on a given branch, glbx walks the
 full commit graph reachable from that branch — following every parent of a merge
 commit, since the pristine imports are reached *through* the integration
 merges — collects the commits whose marker names the package, and selects the
 one that is not an ancestor of any other match. That unique newest-by-ancestry
-import is the baseline. Ancestry decides which import is newest; timestamps and
-version-string ordering never enter into it. If the matching commits do not line
-up on a single chain, the lineage has forked, which glbx reports as an error.
+import is the baseline: ancestry alone decides which import is newest. If the
+matching commits do not line up on a single chain, the lineage has forked, which
+glbx reports as an error.
 
 Tags on accepted imports are a readable index over this history: a tag points at
 a commit the graph already fully describes, so the authority is the commit graph

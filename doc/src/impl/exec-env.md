@@ -1,7 +1,8 @@
 # Execution environment
 
 A hermetic sandbox built directly on Linux namespaces, with its own command-
-line entry point and no dependency on the build engine or the store.
+line entry point. It stands alone — the build engine and the store are built on
+top of it, not the other way round.
 
 ## `internal/ipc`
 

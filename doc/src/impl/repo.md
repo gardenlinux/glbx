@@ -1,8 +1,8 @@
 # Repository access, import, and lock
 
 The front half of the pipeline: fetching from an APT archive, importing a
-source package, and pinning build-time tooling. All usable before any build
-engine or sandbox exists.
+source package, and pinning build-time tooling. These stand on their own, built
+only on the foundations — the build engine and sandbox layer on top of them.
 
 ## `internal/stream`
 

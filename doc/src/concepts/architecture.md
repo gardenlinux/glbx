@@ -41,14 +41,14 @@ together deterministically. Identities are *derived*, not assigned. Two
 artifacts with the same identity are the same artifact — so a cache hit is not
 "probably equivalent", it is equivalent. A change to any leaf input changes that
 leaf's identity, which rolls up through every artifact that depends on it. The
-hash *is* the dependency ledger; no separate change-tracking database is needed.
+hash *is* the dependency ledger: what changed and what must rebuild both fall
+out of comparing identities.
 
 ### 3. The object store
 
-There is exactly one place where results persist and are reused: an **object
-store** made of two parts — a content-addressed store of immutable blobs,
-addressed by the hash of their bytes, and a map from artifact identities to the
-blobs they produced. Everything the system might want to reuse — source
+Results persist and are reused in one place: an **object store** made of two
+parts — a content-addressed store of immutable blobs, addressed by the hash of
+their bytes, and a map from artifact identities to the blobs they produced. Everything the system might want to reuse — source
 archives, dependency lockfiles, built packages, assembled images — is a blob.
 The store is a **cache**, not a system of record: everything in it is either a
 build output that can be rebuilt or an external input that can be re-fetched from
@@ -64,12 +64,12 @@ able to build.
 ### 4. Hermetic sandboxing
 
 Builds run inside isolation built directly on Linux kernel primitives
-(user, mount, and PID namespaces) — not on an external container runtime. The
-reason is to keep host requirements to a minimum: glbx does not prescribe
-Docker, Podman, or any particular runtime being installed, it only relies on
-facilities the kernel already provides. This lets a build run unprivileged, see
-only its declared inputs, and leave the host untouched, while still letting
-unchanged Debian tooling run "as root" inside the sandbox exactly as it expects.
+(user, mount, and PID namespaces). This keeps host requirements to a minimum:
+glbx does not prescribe Docker, Podman, or any particular runtime being
+installed, it only relies on facilities the kernel already provides. This lets a
+build run unprivileged, see only its declared inputs, and leave the host
+untouched, while still letting unchanged Debian tooling run "as root" inside the
+sandbox exactly as it expects.
 Isolation is a property the architecture enforces, not a convention the build is
 trusted to follow.
 

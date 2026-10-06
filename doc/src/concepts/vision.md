@@ -42,8 +42,9 @@ part the other lacks:
 - **Nix-style build systems** supply the discipline: builds as pure functions
   of their inputs, content-addressed identity, isolation as a first-class
   invariant, and reproducibility by construction rather than by convention. glbx
-  adopts this rigor around inputs, identity, and caching — without adopting
-  Nix's store layout or its break from the Debian runtime world.
+  adopts this rigor around inputs, identity, and caching while keeping the Debian
+  runtime world above — its own content-addressed store under a normal
+  `dpkg`-managed system.
 
 The combination is the whole point: Debian's leverage with Nix's guarantees.
 
@@ -70,5 +71,5 @@ Two populations of binaries exist during a build and must not be confused:
   transitively, be buildable entirely from sources we control.
 
 Image assembly is the gate that enforces the distinction: if an image's runtime
-closure contains a binary we did not build from source, the build fails. There
-is no silent fallback to an external mirror for anything that ships.
+closure contains a binary we did not build from source, the build fails. What
+ships is exactly what was built from controlled sources.

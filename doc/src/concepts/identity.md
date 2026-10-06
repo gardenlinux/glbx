@@ -111,9 +111,9 @@ nothing else:
    its source-tree dirhash, the target architecture, and — depending on the kind
    of artifact — the selected binary name, the build profiles and options, and
    the content hash of any pinned external bytes such as the `build-deps.yml`
-   tooling. Each is a leaf value folded in directly; a locally built input is
-   *not* here, because it is an artifact reached by a Depends edge, and so it
-   enters through the next part as an identity.
+   tooling. Each is a leaf value folded in directly; a locally built input
+   enters not here but through the next part, as the identity of the artifact a
+   Depends edge reaches.
 3. The **identities of the Depends dependencies** — and only the Depends edges.
    Includes edges contribute nothing: an artifact is not built from what it
    merely carries along, so a change to an Included sibling must not change the
@@ -156,9 +156,7 @@ source byte, or any Depends dependency changes that artifact's identity, and
 because dependency identities are folded in, the change rolls up through every
 artifact built from it, to the image at the top. The identity is therefore the
 whole dependency ledger: a cache hit is an identity already present in the store,
-and since the identity captures every input exactly, the hit is exact — there is
-no stale-cache failure mode and no separate change-tracking state to keep
-correct.
+and since the identity captures every input exactly, the hit is exact.
 
 ## See also
 

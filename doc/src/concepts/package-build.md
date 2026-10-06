@@ -9,8 +9,6 @@ assumed already present on the branch being built. What follows is everything
 how the build-time tooling is pinned, how the build itself runs, and how its
 outputs are shaped into graph artifacts.
 
-## Two populations of binaries
-
 ## Where a build's inputs come from
 
 The `.deb`s that go into a build come from two sources, and the whole design
@@ -169,8 +167,8 @@ sandbox so that it sees only its declared inputs and leaves the host untouched.
 ### Assembling the build chroot
 
 The sandbox is built from Linux namespaces directly (user, mount, PID — see
-[ARCHITECTURE.md](./architecture.md) §4), with no external container runtime.
-Into a private root filesystem the build assembles:
+[ARCHITECTURE.md](./architecture.md) §4). Into a private root filesystem the
+build assembles:
 
 1. **The build-time tooling.** For the target architecture, the relevant files
    from `build-deps.yml` are taken from the object store (by hash) and installed
