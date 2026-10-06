@@ -8,8 +8,8 @@ sketch — *a blob is an OCI object addressed by its digest, and a map entry is
 published as a tag over the identity.* This document fixes the remote: the exact
 correspondence between the store's two kinds of content and an OCI registry's
 primitives, why nothing published to it is lost to registry garbage collection,
-and the small read-side contract the remote presents so the pull-through store
-stays build-oblivious.
+the small read-side contract the remote presents so the pull-through store stays
+build-oblivious, and how a checkout's local content is published to the registry.
 
 Nothing here changes the local store or the pull-through rules. The remote is one
 more backend; a build run against a pull-through store cannot tell whether the
@@ -184,17 +184,82 @@ hash it asked for.
 ## Publishing
 
 Reads are the hot path and are transparent; writing to the registry is neither.
-Producing results happens locally, and pushing blobs to the registry under their
-`blob/<hash>` tags — and a built artifact's `map/<id>` alias — is a separate,
-privileged step. This is the same import/lock separation the rest of the system
-keeps, where an untrusted build never mutates shared truth
-([object-store.md](./object-store.md) §The remote store). The pull-through store's
-writes always go to its local member only; the registry is filled by that separate
-publish step, not by building. The exact publish surface — what a producer runs,
-which blobs it pushes — is beyond this document, which fixes the representation a
-publisher must produce and a consumer reads: each blob under its `blob/<hash>` tag
-as a one-layer manifest, and a `map/<id>` alias on the manifest-value blob for
-each published artifact identity.
+Producing results happens locally, and filling the registry is a separate,
+privileged step — the same import/lock separation the rest of the system keeps,
+where an untrusted build never mutates shared truth ([object-store.md](./object-store.md)
+§The remote store). The pull-through store's writes always go to its local member
+only; the registry is filled by this step, never by building.
+
+Publishing takes the current checked-out conf-dir and an architecture, and makes
+the registry hold everything that checkout's state references and that was built
+or fetched locally. It is deliberately a *mirror* operation — enumerate the local
+hashes that matter, see which the registry lacks, upload the gap — with no
+bookkeeping of its own. It reuses the two enumerations the system already performs
+for other reasons; publishing is their union pointed at the registry.
+
+### What to publish: the two enumerations
+
+**The recorded inputs.** Exactly the set `restore-cache` collects
+([object-store.md](./object-store.md)) — every blob hash named in a package's
+`sources.yml`, in each `build-deps.yml`, and in the root `rootfs-deps.yml`,
+arch-filtered the same way. These are the upstream archives and tooling `.deb`s a
+build consumes. Each is published as a blob under its `blob/<hash>` tag; an input
+is not a map entry and gets no `map/<id>`.
+
+**The built outputs.** Exactly the set garbage collection walks
+([object-store.md](./object-store.md) §Garbage collection) — the build graph of
+the checkout for the target architecture, and for each node that has already been
+built, its map entry resolved to a manifest-blob hash and the output-blob hashes
+that manifest names. A node not yet built contributes nothing, exactly as it
+contributes nothing to the GC keep-set. For each built node, publishing emits:
+the output blobs and the manifest blob each under their `blob/<hash>` tag, and the
+node's identity as a `map/<id>` alias on the manifest blob.
+
+Both enumerations yield the same currency — content hashes, plus the handful of
+identities that get a map alias — so they merge into one deduplicated worklist: a
+set of blob hashes to ensure, and a set of `(identity, manifest-hash)` pairs to
+alias. A hash that is only in the local store because some *other* checkout built
+it, and that this checkout's graph does not reach, is simply not enumerated;
+publishing mirrors what the current checkout accounts for, nothing more.
+
+### The upload: check what exists, push the rest
+
+Publishing a blob is idempotent and content-checked, so the step is a diff, not a
+blind re-upload:
+
+1. **Skip blobs the registry already has.** For each blob hash on the worklist,
+   test whether its `blob/<hash>` tag already resolves. Because the tag is a pure
+   function of the content, an existing tag means the exact bytes are already
+   published — nothing to do. Only the gap is uploaded.
+2. **Upload a missing blob as blob + one-layer manifest + tag.** Push the blob's
+   bytes, then its one-layer manifest, then the `blob/<hash>` tag — the minimal
+   durable unit from §The correspondence. A blob absent from the *local* store is
+   skipped with a note rather than failing the run: publishing can only mirror
+   what the local store holds, exactly as `restore-cache` can only check what it
+   can fetch.
+3. **Alias each built identity.** For each `(identity, manifest-hash)` pair, if
+   `map/<id>` does not already resolve, set it to point at the same one-layer
+   manifest `blob/<manifest-hash>` already names. This introduces no object; it is
+   one more tag on an existing manifest.
+
+The shared empty config and any manifest a prior push already created are likewise
+skipped when present. The result is that running publish twice over an unchanged
+checkout uploads nothing the second time, and running it after one more package is
+built uploads only that package's new blobs and alias.
+
+### Why this stays simple
+
+Publishing invents no new reachability model and no new on-registry shape. It
+produces exactly the layout §The correspondence fixes — blobs under `blob/<hash>`,
+built identities under `map/<id>` — using the input enumeration `restore-cache`
+already defines and the output enumeration GC already defines. It keeps no state:
+the registry's own tags are the record of what is published, so the "what already
+exists" check is a tag lookup, not a local ledger. And it is safe to interrupt and
+rerun, because every step is an idempotent "ensure this tag exists." The producer
+surface is therefore a single read-only-against-local, write-against-remote pass;
+what command exposes it, and the registry endpoint it targets, follow the same
+`--conf-dir` / `--arch` / registry-reference conventions as the rest of the
+command line.
 
 ## See also
 
