@@ -172,7 +172,7 @@ func (e *Engine) RunWithUI(ctx context.Context, logsOutput string) ([]BuildResul
 // explicit path is created/truncated; an empty path falls back to a tempfile.
 func openLogsOutput(path string) (*os.File, error) {
 	if path == "" {
-		return os.CreateTemp("", "gl-build-*.json")
+		return os.CreateTemp("", "glbx-build-*.json")
 	}
 	return os.Create(path)
 }
