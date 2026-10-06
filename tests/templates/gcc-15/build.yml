@@ -1,6 +1,0 @@
-build_profiles: [nocheck, noudeb, nobiarch]
-build_options: [nostrap, nopgo, nocheck, nodoc, "nolang=go,ada,fortran,d,m2,rust,cobol,algol68,objc,obj-c++,biarch,source", nohppa64, nonvptx, nogcn, nojit, noddebs, noudeb, nosan, nogomp, noitm, nossp, noatomic]
-extra_build_env:
-  - "DEB_STAGE=rtlibs"
-runtime_depends:
-  libgcc-s1: [gcc-15:gcc-15-base, glibc:libc6]

@@ -3,9 +3,3 @@ build_options: [nocheck]
 build_depends: [glibc:libc6-dev]
 runtime_depends:
   libpcre2-8-0: [gcc-16:libgcc-s1]
-  libpcre2-16-0: [gcc-16:libgcc-s1]
-  libpcre2-32-0: [gcc-16:libgcc-s1]
-  libpcre2-posix3: [pcre2:libpcre2-8-0, gcc-16:libgcc-s1]
-  libpcre2-dev: [pcre2:libpcre2-8-0, pcre2:libpcre2-16-0, pcre2:libpcre2-32-0, pcre2:libpcre2-posix3, gcc-16:libgcc-s1]
-lockfile_deps:
-  libpcre2-dev: [linux-libc-dev, rpcsvc-proto]

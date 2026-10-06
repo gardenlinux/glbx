@@ -3,7 +3,3 @@ build_options: [nocheck]
 build_depends: [glibc:libc6-dev]
 runtime_depends:
   libacl1: [attr:libattr1, gcc-16:libgcc-s1]
-  acl: [gcc-16:libgcc-s1]
-  libacl1-dev: [acl:libacl1, gcc-16:libgcc-s1]
-lockfile_deps:
-  libacl1-dev: [linux-libc-dev, rpcsvc-proto]

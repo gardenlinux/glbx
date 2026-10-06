@@ -3,6 +3,3 @@ build_options: [nocheck]
 build_depends: [glibc:libc6-dev]
 runtime_depends:
   libselinux1: [pcre2:libpcre2-8-0, gcc-16:libgcc-s1]
-  libselinux-dev: [libselinux:libselinux1, gcc-16:libgcc-s1]
-lockfile_deps:
-  libselinux-dev: [libsepol-dev, linux-libc-dev, rpcsvc-proto]

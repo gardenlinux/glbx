@@ -3,7 +3,3 @@ build_options: [nocheck]
 build_depends: [glibc:libc6-dev]
 runtime_depends:
   libcap2: [gcc-16:libgcc-s1]
-  libcap-dev: [libcap2:libcap2, gcc-16:libgcc-s1]
-  libcap2-bin: [gcc-16:libgcc-s1]
-lockfile_deps:
-  libcap-dev: [linux-libc-dev, rpcsvc-proto]

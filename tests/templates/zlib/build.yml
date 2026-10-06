@@ -3,6 +3,3 @@ build_options: [nocheck]
 build_depends: [glibc:libc6-dev]
 runtime_depends:
   zlib1g: [gcc-16:libgcc-s1]
-  zlib1g-dev: [zlib:zlib1g, gcc-16:libgcc-s1]
-lockfile_deps:
-  zlib1g-dev: [linux-libc-dev, rpcsvc-proto]

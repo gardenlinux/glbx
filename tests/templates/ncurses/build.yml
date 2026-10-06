@@ -3,8 +3,3 @@ build_options: [nocheck]
 build_depends: [glibc:libc6-dev]
 runtime_depends:
   libtinfo6: [gcc-16:libgcc-s1]
-  libncurses6: [ncurses:libtinfo6, gcc-16:libgcc-s1]
-  libncursesw6: [ncurses:libtinfo6, gcc-16:libgcc-s1]
-  libncurses-dev: [ncurses:libtinfo6, ncurses:libncurses6, ncurses:libncursesw6, gcc-16:libgcc-s1]
-lockfile_deps:
-  libncurses-dev: [linux-libc-dev, rpcsvc-proto]

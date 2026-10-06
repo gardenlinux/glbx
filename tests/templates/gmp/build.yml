@@ -3,10 +3,3 @@ build_options: [nocheck]
 build_depends: [glibc:libc6-dev]
 runtime_depends:
   libgmp10: [gcc-16:libgcc-s1]
-  libgmpxx4ldbl: [gmp:libgmp10, gcc-16:libgcc-s1]
-  libgmp-dev: [gmp:libgmp10, gmp:libgmpxx4ldbl, gcc-16:libgcc-s1]
-  libgmp3-dev: [gmp:libgmp-dev, gcc-16:libgcc-s1]
-lockfile_deps:
-  libgmpxx4ldbl: [libstdc++6]
-  libgmp-dev: [libstdc++6, linux-libc-dev, rpcsvc-proto]
-  libgmp3-dev: [libstdc++6, linux-libc-dev, rpcsvc-proto]

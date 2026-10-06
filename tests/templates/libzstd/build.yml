@@ -3,7 +3,3 @@ build_options: [nocheck]
 build_depends: [glibc:libc6-dev]
 runtime_depends:
   libzstd1: [gcc-16:libgcc-s1]
-  libzstd-dev: [libzstd:libzstd1, gcc-16:libgcc-s1]
-  zstd: [gcc-16:libgcc-s1]
-lockfile_deps:
-  libzstd-dev: [linux-libc-dev, rpcsvc-proto]
