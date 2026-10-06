@@ -87,11 +87,11 @@ func ResolveOutputRefs(a Artifact, store *objstore.Store) (objstore.Hash, []objs
 }
 
 // loadManifest reads and parses the manifest for an identity. It uses
-// Store.MapGet, so on a local miss with a remote configured the manifest is
+// Map.Get, so on a local miss with a remote configured the manifest is
 // reconstructed and its leaves pulled, turning a would-be rebuild into a
 // cache hit; with no remote it is a plain local lookup.
 func (e *Engine) loadManifest(identity objstore.Hash) ([]Output, error) {
-	manifestHash, err := e.store.MapGet(identity)
+	manifestHash, err := e.store.Map.Get(identity)
 	if err != nil {
 		return nil, err
 	}

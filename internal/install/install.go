@@ -36,13 +36,11 @@ func InstallResolved(ctx context.Context, cont *container.Container, mountNS *co
 			return fmt.Errorf("missing blob for %s (%s)", pkg.Name, pkg.SHA256)
 		}
 		// Materialize the .deb locally, pulling from the remote by digest on a
-		// miss. No-op with no remote or when already present.
-		store.EnsureBlob(hash)
-		if !store.Blobs.Has(hash) {
+		// miss. A path error means it is unavailable (locally and remotely).
+		blobPath, err := store.Blobs.Path(hash)
+		if err != nil || !store.Blobs.Has(hash) {
 			return fmt.Errorf("missing blob for %s (%s)", pkg.Name, pkg.SHA256)
 		}
-
-		blobPath := store.Blobs.Path(hash)
 		debName := fmt.Sprintf("%s_%s_%s.deb", pkg.Name, pkg.Version, pkg.Architecture)
 		targetPath := pkgsDir + "/" + debName
 

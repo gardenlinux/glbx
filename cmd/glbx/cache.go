@@ -151,7 +151,11 @@ func cacheBlobs(args []string) error {
 		if err != nil {
 			return err
 		}
-		fmt.Println(store.Blobs.Path(h))
+		p, err := store.Blobs.Path(h)
+		if err != nil {
+			return err
+		}
+		fmt.Println(p)
 		return nil
 	case "store":
 		if len(args) < 2 {

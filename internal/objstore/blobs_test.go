@@ -10,7 +10,7 @@ import (
 	"testing"
 )
 
-func setupBlobs(t *testing.T) *Blobs {
+func setupBlobs(t *testing.T) *localBlobs {
 	t.Helper()
 	b, err := newBlobs(t.TempDir())
 	if err != nil {
@@ -122,7 +122,10 @@ func TestBlobs_OpenNonExistent(t *testing.T) {
 func TestBlobs_Path(t *testing.T) {
 	b := setupBlobs(t)
 	h := MustHash("9a09690faf8b2b09cb02be917387a121be291af320548a1600b5105bc646be53")
-	path := b.Path(h)
+	path, err := b.Path(h)
+	if err != nil {
+		t.Fatalf("Path: %v", err)
+	}
 	if !strings.Contains(path, "9a") {
 		t.Errorf("Path should contain prefix shard, got %q", path)
 	}
@@ -216,8 +219,12 @@ func TestBlobs_AtomicStore(t *testing.T) {
 			t.Errorf("found leftover temp file: %s", entry.Name())
 		}
 	}
-	if _, err := os.Stat(b.Path(h)); err != nil {
-		t.Errorf("blob file not at expected path %s: %v", b.Path(h), err)
+	p, err := b.Path(h)
+	if err != nil {
+		t.Fatalf("Path: %v", err)
+	}
+	if _, err := os.Stat(p); err != nil {
+		t.Errorf("blob file not at expected path %s: %v", p, err)
 	}
 }
 

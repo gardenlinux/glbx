@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-func setupMapStore(t *testing.T) (*MapStore, *Blobs) {
+func setupMapStore(t *testing.T) (*localMap, *localBlobs) {
 	t.Helper()
 	dir := t.TempDir()
 	b, err := newBlobs(dir + "/blobs")

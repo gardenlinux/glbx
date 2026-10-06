@@ -367,11 +367,10 @@ func (r *Rootfs) extractLayers(ctx context.Context, mountNS *container.MountNS, 
 
 	l.Info("extracting Layer 0 (local packages)")
 	for _, lp := range installPkgs {
-		store.EnsureBlob(lp.debHash) // pull-through by digest
-		if !store.Blobs.Has(lp.debHash) {
+		blobPath, err := store.Blobs.Path(lp.debHash)
+		if err != nil || !store.Blobs.Has(lp.debHash) {
 			return fmt.Errorf("local deb blob %s (%s) not in store", lp.debHash, lp.name)
 		}
-		blobPath := store.Blobs.Path(lp.debHash)
 		if err := container.Run(mountNS, &container.ExecRequest{
 			Argv: []string{"dpkg-deb", "-x", blobPath, paths.layer0},
 			Env:  []string{"DEBIAN_FRONTEND=noninteractive"},
@@ -390,11 +389,10 @@ func (r *Rootfs) extractLayers(ctx context.Context, mountNS *container.MountNS, 
 		if err != nil {
 			continue
 		}
-		store.EnsureBlob(hash) // pull-through by digest
-		if !store.Blobs.Has(hash) {
+		blobPath, err := store.Blobs.Path(hash)
+		if err != nil || !store.Blobs.Has(hash) {
 			continue
 		}
-		blobPath := store.Blobs.Path(hash)
 		if err := container.Run(mountNS, &container.ExecRequest{
 			Argv: []string{"dpkg-deb", "-x", blobPath, paths.layer1},
 			Env:  []string{"DEBIAN_FRONTEND=noninteractive"},
@@ -501,26 +499,24 @@ func (r *Rootfs) setupRootfsRepo(mountNS *container.MountNS, store *objstore.Sto
 	}
 
 	for _, lp := range localPkgs {
-		store.EnsureBlob(lp.debHash) // pull-through by digest
-		if !store.Blobs.Has(lp.debHash) {
+		blobPath, err := store.Blobs.Path(lp.debHash)
+		if err != nil || !store.Blobs.Has(lp.debHash) {
 			continue
 		}
-		blobPath := store.Blobs.Path(lp.debHash)
 
 		controlKey := "control:" + lp.name
 		controlHash, hasControl := inputs[controlKey]
 
 		var pkg *index.Package
-		if hasControl {
-			store.EnsureBlob(controlHash) // pull-through by digest
-		}
 		if hasControl && store.Blobs.Has(controlHash) {
-			f, err := os.Open(store.Blobs.Path(controlHash))
-			if err == nil {
-				idx, err := index.Load(f)
-				f.Close()
-				if err == nil && idx.Len() > 0 {
-					pkg = idx.All()[0]
+			if cp, err := store.Blobs.Path(controlHash); err == nil {
+				f, err := os.Open(cp)
+				if err == nil {
+					idx, err := index.Load(f)
+					f.Close()
+					if err == nil && idx.Len() > 0 {
+						pkg = idx.All()[0]
+					}
 				}
 			}
 		}

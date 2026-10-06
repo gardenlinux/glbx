@@ -44,7 +44,7 @@ func (s *DebianPkgBuild) LoadBinaryPkg(binaryName string, store *objstore.Store)
 	if err != nil {
 		return nil
 	}
-	manifestHash, err := store.MapGet(srcID)
+	manifestHash, err := store.Map.Get(srcID)
 	if err != nil {
 		return nil
 	}

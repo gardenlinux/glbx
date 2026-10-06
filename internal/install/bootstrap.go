@@ -90,12 +90,11 @@ func BootstrapResolved(ctx context.Context, mountNS *container.MountNS, store *o
 			l.Warn("skipping %s: blob not in store", pkg.Name)
 			continue
 		}
-		store.EnsureBlob(hash) // pull-through by digest if not local
-		if !store.Blobs.Has(hash) {
+		blobPath, err := store.Blobs.Path(hash)
+		if err != nil || !store.Blobs.Has(hash) {
 			l.Warn("skipping %s: blob not in store", pkg.Name)
 			continue
 		}
-		blobPath := store.Blobs.Path(hash)
 		if err := container.Run(mountNS, &container.ExecRequest{
 			Argv: []string{"dpkg-deb", "--extract", blobPath, rootfsPath},
 			Env:  []string{"DEBIAN_FRONTEND=noninteractive"},

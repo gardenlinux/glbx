@@ -185,7 +185,7 @@ func (b *debianBinaryPkg) Build(ctx artifact.BuildContext) ([]artifact.Output, e
 // runtime Depends/Pre-Depends alternative is satisfiable either from the local
 // build closure or from this binary's declared lockfile_deps allowance.
 func (b *debianBinaryPkg) validateLocality(store *objstore.Store, controlHash objstore.Hash) error {
-	reader, err := store.OpenBlob(controlHash)
+	reader, err := store.Blobs.Open(controlHash)
 	if err != nil {
 		return fmt.Errorf("binary package %s: open control blob: %w", b.name, err)
 	}

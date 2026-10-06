@@ -8,32 +8,46 @@ import (
 	"strings"
 )
 
-// MapStore maps an artifact identity to the hash of its manifest blob. Each
-// entry is a one-line file at <root>/<prefix>/<suffix> holding that hash.
-type MapStore struct {
-	root  string
-	blobs *Blobs
+// MapStore maps an artifact identity to the hash of its manifest blob. A
+// pull-through implementation reconstructs an absent entry from a remote on read;
+// a local implementation answers from the filesystem alone. Write and maintenance
+// operations always act on the local layer.
+type MapStore interface {
+	Has(key Hash) bool
+	Get(key Hash) (Hash, error)
+	Set(key, value Hash, validate bool) error
+	Delete(key Hash) error
+	Iterate(fn func(key Hash) error) error
+	SweepFollowingBlobs() (int, error)
 }
 
-func newMapStore(root string, blobs *Blobs) (*MapStore, error) {
+// localMap is the filesystem-backed MapStore. Each entry is a one-line file at
+// <root>/<prefix>/<suffix> holding the manifest-blob hash. It has no knowledge of
+// any remote.
+type localMap struct {
+	root  string
+	blobs BlobStore
+}
+
+func newMapStore(root string, blobs BlobStore) (*localMap, error) {
 	if err := os.MkdirAll(root, 0o755); err != nil {
 		return nil, fmt.Errorf("creating map directory: %w", err)
 	}
-	return &MapStore{root: root, blobs: blobs}, nil
+	return &localMap{root: root, blobs: blobs}, nil
 }
 
-func (m *MapStore) path(key Hash) string {
+func (m *localMap) path(key Hash) string {
 	return filepath.Join(m.root, key.Prefix(), key.Suffix())
 }
 
 // Has reports whether a mapping exists for key.
-func (m *MapStore) Has(key Hash) bool {
+func (m *localMap) Has(key Hash) bool {
 	_, err := os.Stat(m.path(key))
 	return err == nil
 }
 
 // Get returns the blob hash key maps to, or an error if the mapping is absent.
-func (m *MapStore) Get(key Hash) (Hash, error) {
+func (m *localMap) Get(key Hash) (Hash, error) {
 	data, err := os.ReadFile(m.path(key))
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -50,7 +64,7 @@ func (m *MapStore) Get(key Hash) (Hash, error) {
 
 // Set records a mapping from key to value, written atomically. When validate is
 // true it first checks that value references an existing blob.
-func (m *MapStore) Set(key, value Hash, validate bool) error {
+func (m *localMap) Set(key, value Hash, validate bool) error {
 	if validate && !m.blobs.Has(value) {
 		return fmt.Errorf("map value %s does not reference an existing blob", value)
 	}
@@ -83,7 +97,7 @@ func (m *MapStore) Set(key, value Hash, validate bool) error {
 }
 
 // Delete removes a mapping by key, erroring if it is absent.
-func (m *MapStore) Delete(key Hash) error {
+func (m *localMap) Delete(key Hash) error {
 	p := m.path(key)
 	if err := os.Remove(p); err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -97,7 +111,7 @@ func (m *MapStore) Delete(key Hash) error {
 
 // Iterate calls fn for each map key. Iteration stops on the first error fn
 // returns.
-func (m *MapStore) Iterate(fn func(key Hash) error) error {
+func (m *localMap) Iterate(fn func(key Hash) error) error {
 	shards, err := os.ReadDir(m.root)
 	if err != nil {
 		return fmt.Errorf("reading map directory: %w", err)
@@ -129,7 +143,7 @@ func (m *MapStore) Iterate(fn func(key Hash) error) error {
 
 // SweepFollowingBlobs deletes every map entry whose target blob no longer
 // exists, keeping the map consistent with the blobs after a blob sweep.
-func (m *MapStore) SweepFollowingBlobs() (int, error) {
+func (m *localMap) SweepFollowingBlobs() (int, error) {
 	var dead []Hash
 	err := m.Iterate(func(key Hash) error {
 		target, err := m.Get(key)

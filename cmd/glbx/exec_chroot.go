@@ -117,7 +117,10 @@ func cmdExecChroot(args []string) error {
 	}
 
 	// Bind-mount the tar.gz blob into the MountNS.
-	blobPath := store.Blobs.Path(tarBlobHash)
+	blobPath, err := store.Blobs.Path(tarBlobHash)
+	if err != nil {
+		return fmt.Errorf("locate rootfs blob: %w", err)
+	}
 	tarMountPath := workPath + "/rootfs.tar.gz"
 	if err := mountNS.CreateFile(tarMountPath, 0644); err != nil {
 		return fmt.Errorf("create mount target: %w", err)

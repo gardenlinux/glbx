@@ -48,12 +48,10 @@ func setupLocalRepoInMountNS(mountNS *container.MountNS, store *objstore.Store, 
 		if err != nil {
 			continue
 		}
-		store.EnsureBlob(hash) // pull-through by digest
-		if !store.Blobs.Has(hash) {
+		blobPath, err := store.Blobs.Path(hash)
+		if err != nil || !store.Blobs.Has(hash) {
 			continue
 		}
-
-		blobPath := store.Blobs.Path(hash)
 		debName := fmt.Sprintf("%s_%s_%s.deb", pkg.Name, pkg.Version, pkg.Architecture)
 		targetPath := rootfs + "/pkgs/" + debName
 

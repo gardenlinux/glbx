@@ -27,10 +27,11 @@ func pinnedToolingIndex(store *objstore.Store, tools []buildcfg.PinnedTool, arch
 			if idx.Get(tool.Name) != nil {
 				break
 			}
-			if err := store.EnsureBlob(f.Hash); err != nil {
+			blobPath, err := store.Blobs.Path(f.Hash)
+			if err != nil {
 				return nil, fmt.Errorf("tool %s: %w", tool.Name, err)
 			}
-			control, err := debControl(store.Blobs.Path(f.Hash))
+			control, err := debControl(blobPath)
 			if err != nil {
 				return nil, fmt.Errorf("tool %s: read control: %w", tool.Name, err)
 			}

@@ -120,7 +120,9 @@ func Restore(cfg Config) (Result, error) {
 func fetchItem(cfg Config, it item) (bool, error) {
 	l := log.From(cfg.Ctx, log.Fetch)
 
-	if err := cfg.Store.EnsureBlob(it.hash); err == nil && cfg.Store.Blobs.Has(it.hash) {
+	// Blobs.Has pulls through the remote (when one is configured) before
+	// answering, so a hit here already means the blob is local.
+	if cfg.Store.Blobs.Has(it.hash) {
 		l.Debug("cached %s (%s)", it.label, it.hash.Short())
 		return false, nil
 	}

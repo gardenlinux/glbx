@@ -107,7 +107,7 @@ func (b *debianBinaryPkg) installCheck(ctx context.Context, store *objstore.Stor
 // buildTestPackageEntry constructs the index.Package for the binary under test
 // from its control blob and .deb hash.
 func (b *debianBinaryPkg) buildTestPackageEntry(store *objstore.Store, controlHash, debHash objstore.Hash) *index.Package {
-	controlReader, err := store.OpenBlob(controlHash)
+	controlReader, err := store.Blobs.Open(controlHash)
 	if err != nil {
 		return nil
 	}
@@ -123,9 +123,11 @@ func (b *debianBinaryPkg) buildTestPackageEntry(store *objstore.Store, controlHa
 	if !debHash.IsZero() {
 		pkg.SHA256 = debHash.String()
 		pkg.Stanza["sha256"] = debHash.String()
-		if info, err := os.Stat(store.Blobs.Path(debHash)); err == nil {
-			pkg.Size = info.Size()
-			pkg.Stanza["size"] = strconv.FormatInt(info.Size(), 10)
+		if p, err := store.Blobs.Path(debHash); err == nil {
+			if info, err := os.Stat(p); err == nil {
+				pkg.Size = info.Size()
+				pkg.Stanza["size"] = strconv.FormatInt(info.Size(), 10)
+			}
 		}
 	}
 	return pkg

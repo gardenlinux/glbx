@@ -92,13 +92,10 @@ func (s *DebianPkgBuild) setupBuildEnv(ctx context.Context, store *objstore.Stor
 		if err != nil {
 			continue
 		}
-		if !store.Blobs.Has(hash) {
-			store.EnsureBlob(hash) // pull-through by digest
-		}
-		if !store.Blobs.Has(hash) {
+		blobPath, err := store.Blobs.Path(hash)
+		if err != nil || !store.Blobs.Has(hash) {
 			continue
 		}
-		blobPath := store.Blobs.Path(hash)
 		if err := container.Run(mountNS, &container.ExecRequest{
 			Argv: []string{"dpkg-deb", "-x", blobPath, rootfsPath},
 			Env:  []string{"DEBIAN_FRONTEND=noninteractive"},
@@ -134,8 +131,11 @@ func (s *DebianPkgBuild) setupBuildEnv(ctx context.Context, store *objstore.Stor
 		if strings.HasSuffix(ref.File, ".asc") || strings.HasSuffix(ref.File, ".sig") {
 			continue
 		}
-		store.EnsureBlob(ref.Hash) // pull-through by digest
-		blobPath := store.Blobs.Path(ref.Hash)
+		blobPath, err := store.Blobs.Path(ref.Hash)
+		if err != nil {
+			l.Warn("orig tarball %s: %v", ref.File, err)
+			continue
+		}
 		tarDst := rootfsPath + "/src/" + ref.File
 		if err := mountNS.CreateFile(tarDst, 0644); err != nil {
 			l.Warn("create %s: %v", ref.File, err)

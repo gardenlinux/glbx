@@ -10,39 +10,56 @@ import (
 	"path/filepath"
 )
 
-// Blobs is content-addressed blob storage. A blob lives at
+// BlobStore is content-addressed blob storage keyed by the SHA-256 of a blob's
+// bytes. Read operations (Has, Open, Path) on a pull-through implementation
+// transparently materialize an absent blob from a remote into the local layer
+// before answering; a local implementation answers from the filesystem alone.
+// Write and maintenance operations (Store, Delete, Sweep) always act on the
+// local layer.
+type BlobStore interface {
+	Has(h Hash) bool
+	Open(h Hash) (io.ReadCloser, error)
+	Path(h Hash) (string, error)
+	Store(r io.Reader) (Hash, error)
+	Delete(h Hash) error
+	Sweep(keep map[Hash]struct{}) (int, error)
+	Iterate(fn func(Hash) error) error
+}
+
+// localBlobs is the filesystem-backed BlobStore. A blob lives at
 // <root>/<prefix>/<suffix>, derived from the SHA-256 of its bytes, so the same
 // content always maps to the same path and a blob is immutable under its
-// address.
-type Blobs struct {
+// address. It has no knowledge of any remote.
+type localBlobs struct {
 	root string
 }
 
-func newBlobs(root string) (*Blobs, error) {
+func newBlobs(root string) (*localBlobs, error) {
 	if err := os.MkdirAll(root, 0o755); err != nil {
 		return nil, fmt.Errorf("creating blobs directory: %w", err)
 	}
-	return &Blobs{root: root}, nil
+	return &localBlobs{root: root}, nil
 }
 
-func (b *Blobs) path(h Hash) string {
+func (b *localBlobs) path(h Hash) string {
 	return filepath.Join(b.root, h.Prefix(), h.Suffix())
 }
 
 // Has reports whether a blob with the given hash exists.
-func (b *Blobs) Has(h Hash) bool {
+func (b *localBlobs) Has(h Hash) bool {
 	_, err := os.Stat(b.path(h))
 	return err == nil
 }
 
 // Path returns the filesystem path a blob would occupy. It does not check that
-// the blob exists.
-func (b *Blobs) Path(h Hash) string {
-	return b.path(h)
+// the blob exists; the error exists for implementations that may fail to make a
+// blob locally available.
+func (b *localBlobs) Path(h Hash) (string, error) {
+	return b.path(h), nil
 }
 
 // Open returns a reader over the blob's bytes, or an error if it is absent.
-func (b *Blobs) Open(h Hash) (io.ReadCloser, error) {
+func (b *localBlobs) Open(h Hash) (io.ReadCloser, error) {
 	p := b.path(h)
 	f, err := os.Open(p)
 	if err != nil {
@@ -66,7 +83,7 @@ func (b *Blobs) Open(h Hash) (io.ReadCloser, error) {
 // into its content-addressed place once the digest is known. A reader never
 // sees a partial blob under a valid address, and concurrent writers of the same
 // content converge on the same path. Returns the content hash.
-func (b *Blobs) Store(r io.Reader) (Hash, error) {
+func (b *localBlobs) Store(r io.Reader) (Hash, error) {
 	tmp, err := os.CreateTemp(b.root, ".blob-tmp-*")
 	if err != nil {
 		return Hash{}, fmt.Errorf("creating temp file for blob: %w", err)
@@ -113,7 +130,7 @@ func (b *Blobs) Store(r io.Reader) (Hash, error) {
 }
 
 // Delete removes a blob by hash, erroring if it is absent.
-func (b *Blobs) Delete(h Hash) error {
+func (b *localBlobs) Delete(h Hash) error {
 	p := b.path(h)
 	if err := os.Remove(p); err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -127,7 +144,7 @@ func (b *Blobs) Delete(h Hash) error {
 
 // Sweep deletes every blob not present in keep and returns the count deleted.
 // The caller supplies the keep-set; Sweep applies no policy of its own.
-func (b *Blobs) Sweep(keep map[Hash]struct{}) (int, error) {
+func (b *localBlobs) Sweep(keep map[Hash]struct{}) (int, error) {
 	var toDelete []Hash
 	err := b.Iterate(func(h Hash) error {
 		if _, ok := keep[h]; !ok {
@@ -150,7 +167,7 @@ func (b *Blobs) Sweep(keep map[Hash]struct{}) (int, error) {
 
 // Iterate calls fn for each stored blob hash. Iteration stops on the first
 // error fn returns.
-func (b *Blobs) Iterate(fn func(Hash) error) error {
+func (b *localBlobs) Iterate(fn func(Hash) error) error {
 	shards, err := os.ReadDir(b.root)
 	if err != nil {
 		return fmt.Errorf("reading blobs directory: %w", err)
