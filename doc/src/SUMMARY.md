@@ -8,6 +8,7 @@
 - [Architecture](./concepts/architecture.md)
 - [Identity](./concepts/identity.md)
 - [The object store](./concepts/object-store.md)
+- [The remote cache](./concepts/remote-cache.md)
 - [The artifact model](./concepts/artifact-model.md)
 - [Source lineage](./concepts/source-lineage.md)
 - [Package building](./concepts/package-build.md)
