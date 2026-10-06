@@ -2,6 +2,4 @@ build_profiles: [nocheck, noudeb]
 build_options: [nocheck]
 build_depends: [glibc:libc6-dev]
 runtime_depends:
-  bash: [ncurses:libtinfo6, base-files:base-files, debianutils:debianutils]
-lockfile_deps:
-  bash: [libgcc-s1]
+  bash: [ncurses:libtinfo6, base-files:base-files, debianutils:debianutils, gcc-16:libgcc-s1]

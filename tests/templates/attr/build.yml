@@ -2,8 +2,8 @@ build_profiles: [nocheck, noudeb]
 build_options: [nocheck]
 build_depends: [glibc:libc6-dev]
 runtime_depends:
-  libattr1-dev: [attr:libattr1]
+  attr: [gcc-16:libgcc-s1]
+  libattr1: [gcc-16:libgcc-s1]
+  libattr1-dev: [attr:libattr1, gcc-16:libgcc-s1]
 lockfile_deps:
-  attr: [libgcc-s1]
-  libattr1: [libgcc-s1]
-  libattr1-dev: [libgcc-s1, linux-libc-dev, rpcsvc-proto]
+  libattr1-dev: [linux-libc-dev, rpcsvc-proto]

@@ -2,6 +2,4 @@ build_profiles: [nocheck, noudeb]
 build_options: [nocheck]
 build_depends: [glibc:libc6-dev]
 runtime_depends:
-  dpkg: [tar:tar, zlib:zlib1g, libzstd:libzstd1, libselinux:libselinux1, bzip2:libbz2-1.0, xz-utils:liblzma5, libmd:libmd0]
-lockfile_deps:
-  dpkg: [libgcc-s1]
+  dpkg: [tar:tar, zlib:zlib1g, libzstd:libzstd1, libselinux:libselinux1, bzip2:libbz2-1.0, xz-utils:liblzma5, libmd:libmd0, gcc-16:libgcc-s1]

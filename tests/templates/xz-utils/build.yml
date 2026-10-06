@@ -2,9 +2,8 @@ build_profiles: [nocheck, noudeb]
 build_options: [nocheck]
 build_depends: [glibc:libc6-dev]
 runtime_depends:
-  liblzma-dev: [xz-utils:liblzma5, xz-utils:xz-utils]
-  xz-utils: [xz-utils:liblzma5]
+  liblzma-dev: [xz-utils:liblzma5, xz-utils:xz-utils, gcc-16:libgcc-s1]
+  xz-utils: [xz-utils:liblzma5, gcc-16:libgcc-s1]
+  liblzma5: [gcc-16:libgcc-s1]
 lockfile_deps:
-  liblzma5: [libgcc-s1]
-  liblzma-dev: [libgcc-s1, linux-libc-dev, rpcsvc-proto]
-  xz-utils: [libgcc-s1]
+  liblzma-dev: [linux-libc-dev, rpcsvc-proto]

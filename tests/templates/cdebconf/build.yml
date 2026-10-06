@@ -2,8 +2,8 @@ build_profiles: [nocheck, pkg.cdebconf.nogtk]
 build_options: [nocheck]
 build_depends: [glibc:libc6-dev]
 runtime_depends:
-  libdebconfclient0-dev: [cdebconf:libdebconfclient0]
+  cdebconf: [gcc-16:libgcc-s1]
+  libdebconfclient0: [gcc-16:libgcc-s1]
+  libdebconfclient0-dev: [cdebconf:libdebconfclient0, gcc-16:libgcc-s1]
 lockfile_deps:
-  cdebconf: [libgcc-s1]
-  libdebconfclient0: [libgcc-s1]
-  libdebconfclient0-dev: [libgcc-s1, linux-libc-dev, rpcsvc-proto]
+  libdebconfclient0-dev: [linux-libc-dev, rpcsvc-proto]

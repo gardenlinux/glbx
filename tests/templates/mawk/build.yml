@@ -1,5 +1,5 @@
 build_profiles: [nocheck, noudeb]
 build_options: [nocheck]
 build_depends: [glibc:libc6-dev]
-lockfile_deps:
-  mawk: [libgcc-s1]
+runtime_depends:
+  mawk: [gcc-16:libgcc-s1]

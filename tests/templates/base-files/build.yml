@@ -1,6 +1,4 @@
 build_profiles: [nocheck, noudeb]
 build_options: [nocheck]
 runtime_depends:
-  base-files: [mawk:mawk]
-lockfile_deps:
-  base-files: [libgcc-s1]
+  base-files: [mawk:mawk, gcc-16:libgcc-s1]

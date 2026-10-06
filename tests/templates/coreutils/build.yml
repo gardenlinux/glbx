@@ -3,5 +3,3 @@ build_options: [nocheck]
 build_depends: [glibc:libc6-dev]
 runtime_depends:
   coreutils: [acl:libacl1, attr:libattr1, libcap2:libcap2, gmp:libgmp10, libselinux:libselinux1, openssl:libssl3t64, systemd:libsystemd0, gcc-16:libgcc-s1]
-lockfile_deps:
-  coreutils: [libgcc-s1]
