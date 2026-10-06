@@ -203,12 +203,23 @@ func (s *DebianPkgBuild) Build(ctx artifact.BuildContext) ([]artifact.Output, er
 	}
 
 	// The chroot gets the pinned build tooling plus every locally-built
-	// dependency binary layered on top.
-	chrootPkgs := lockfileIndex.All()
-	for _, pkg := range s.buildLocalIndexForBuild(store).All() {
-		chrootPkgs = append(chrootPkgs, pkg)
+	// dependency binary. A locally-built package overrides same-named external
+	// tooling: the pinned copy is dropped so its version cannot shadow or
+	// downgrade the local one (which same-source siblings depend on by exact
+	// version).
+	localPkgs := s.buildLocalIndexForBuild(store).All()
+	localNames := make(map[string]bool, len(localPkgs))
+	for _, pkg := range localPkgs {
+		localNames[pkg.Name] = true
 	}
-	l.Info("%d chroot packages (%d pinned tooling)", len(chrootPkgs), lockfileIndex.Len())
+	var chrootPkgs []*index.Package
+	for _, pkg := range lockfileIndex.All() {
+		if !localNames[pkg.Name] {
+			chrootPkgs = append(chrootPkgs, pkg)
+		}
+	}
+	chrootPkgs = append(chrootPkgs, localPkgs...)
+	l.Info("%d chroot packages (%d locally built)", len(chrootPkgs), len(localPkgs))
 
 	refs, err := buildcfg.LoadSourcesYML(s.PkgDir)
 	if err != nil && !os.IsNotExist(err) {
@@ -232,39 +243,16 @@ func (s *DebianPkgBuild) Build(ctx artifact.BuildContext) ([]artifact.Output, er
 	return outputs, nil
 }
 
-// loadLockfileIndex reads the explicit build-deps.yml pins and builds an index
-// of the pinned build-tooling packages for the target architecture. The pins
-// are already a resolved closure, so each becomes one package entry carrying
-// its name, exact version, architecture, and content hash — the chroot installs
-// exactly this set, with no further resolution.
+// loadLockfileIndex reads the explicit build-deps.yml pins and builds a
+// metadata-bearing index of the pinned build tooling for the target
+// architecture (control stanzas read from the .deb blobs), supporting real
+// dependency resolution and essential-set selection.
 func (s *DebianPkgBuild) loadLockfileIndex() (*index.Index, error) {
 	tools, err := buildcfg.LoadBuildDeps(filepath.Join(s.PkgDir, "build-deps.yml"))
 	if err != nil {
 		return nil, err
 	}
-	idx := index.New()
-	for _, tool := range tools {
-		for _, f := range tool.Files {
-			if f.Arch != s.Arch && f.Arch != "all" {
-				continue
-			}
-			stanza := map[string]string{
-				"package":      tool.Name,
-				"version":      tool.Version,
-				"architecture": f.Arch,
-				"sha256":       f.Hash.String(),
-			}
-			pkg, err := index.ParsePackageFromStanza(stanza)
-			if err != nil {
-				return nil, fmt.Errorf("tool %s: %w", tool.Name, err)
-			}
-			if idx.Get(pkg.Name) == nil {
-				idx.Add(pkg)
-			}
-			break
-		}
-	}
-	return idx, nil
+	return pinnedToolingIndex(s.store, tools, s.Arch)
 }
 
 func (s *DebianPkgBuild) computeVersion() (string, error) {

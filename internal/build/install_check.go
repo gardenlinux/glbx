@@ -36,18 +36,30 @@ func (b *debianBinaryPkg) installCheck(ctx context.Context, store *objstore.Stor
 	l.Info("%s: %d local packages for install check", b.name, localIndex.Len())
 
 	// Per-binary lockfile_deps: pull the named externals from the pinned set
-	// into the local index so resolution of the test package can see them.
+	// into the local index so resolution of the test package can see them. A
+	// name not present in the pinned tooling is a tolerance that does not apply
+	// to the current archive — skip it rather than failing.
 	if names := b.lockfileDepNames(); len(names) > 0 {
-		extra, err := install.Resolve(bootstrapIndex, b.sourceBuild.Arch, names)
-		if err != nil {
-			return fmt.Errorf("resolve lockfile_deps for %s: %w", b.name, err)
-		}
-		for _, pkg := range extra {
-			if localIndex.Get(pkg.Name) == nil {
-				localIndex.Add(pkg)
+		var present []string
+		for _, n := range names {
+			if bootstrapIndex.Get(n) != nil {
+				present = append(present, n)
+			} else {
+				l.Debug("%s: lockfile_dep %q not in pinned tooling; skipping", b.name, n)
 			}
 		}
-		l.Info("%s: added %d lockfile_deps packages", b.name, len(extra))
+		if len(present) > 0 {
+			extra, err := install.Resolve(bootstrapIndex, b.sourceBuild.Arch, present)
+			if err != nil {
+				return fmt.Errorf("resolve lockfile_deps for %s: %w", b.name, err)
+			}
+			for _, pkg := range extra {
+				if localIndex.Get(pkg.Name) == nil {
+					localIndex.Add(pkg)
+				}
+			}
+			l.Info("%s: added %d lockfile_deps packages", b.name, len(extra))
+		}
 	}
 
 	resolved, err := install.Resolve(localIndex, b.sourceBuild.Arch, []string{b.name})
@@ -68,7 +80,9 @@ func (b *debianBinaryPkg) installCheck(ctx context.Context, store *objstore.Stor
 	mountNS := stack.MountNS
 	mountNS.Mkdir("/tmp", 01777)
 
-	cont, rootfsPath, contCleanup, err := install.BootstrapResolved(ctx, mountNS, store, bootstrapIndex.All(), stubPath)
+	// Bootstrap a minimal base from the pinned tooling's essential set — just
+	// enough of a working system (dpkg, libc, …) to run the install check.
+	cont, rootfsPath, contCleanup, err := install.Bootstrap(ctx, mountNS, store, bootstrapIndex, b.sourceBuild.Arch, stubPath)
 	if err != nil {
 		return fmt.Errorf("bootstrap for install check: %w", err)
 	}

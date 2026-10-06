@@ -169,36 +169,15 @@ func (r *Rootfs) loadImageToolingPins() ([]buildcfg.PinnedTool, error) {
 	return buildcfg.LoadBuildDeps(filepath.Join(r.baseDir, "rootfs-deps.yml"))
 }
 
-// loadLockfileIndex builds an index of the pinned image-configuration tooling
-// (Layer 1) for the target architecture from the explicit rootfs-deps.yml pins.
+// loadLockfileIndex builds a metadata-bearing index of the pinned image-
+// configuration tooling (Layer 1) for the target architecture from the explicit
+// rootfs-deps.yml pins (control stanzas read from the .deb blobs).
 func (r *Rootfs) loadLockfileIndex() (*index.Index, error) {
 	tools, err := r.loadImageToolingPins()
 	if err != nil {
 		return nil, err
 	}
-	idx := index.New()
-	for _, tool := range tools {
-		for _, f := range tool.Files {
-			if f.Arch != r.Arch && f.Arch != "all" {
-				continue
-			}
-			stanza := map[string]string{
-				"package":      tool.Name,
-				"version":      tool.Version,
-				"architecture": f.Arch,
-				"sha256":       f.Hash.String(),
-			}
-			pkg, err := index.ParsePackageFromStanza(stanza)
-			if err != nil {
-				return nil, fmt.Errorf("image tool %s: %w", tool.Name, err)
-			}
-			if idx.Get(pkg.Name) == nil {
-				idx.Add(pkg)
-			}
-			break
-		}
-	}
-	return idx, nil
+	return pinnedToolingIndex(r.store, tools, r.Arch)
 }
 
 // rootfsLocalPkg holds a local package's name and .deb blob hash.
@@ -309,7 +288,10 @@ func (r *Rootfs) narrowInstallSet(localPkgs []rootfsLocalPkg, store *objstore.St
 	localIdx := r.buildLocalIndex(store)
 	resolveIdx := localIdx
 	if toolingIdx, err := r.loadLockfileIndex(); err == nil {
-		resolveIdx = localIdx.Merge(toolingIdx)
+		// Local packages override same-named tooling: the shipping set resolves
+		// against the locally-built packages' own dependency metadata, which is
+		// what the image actually installs.
+		resolveIdx = toolingIdx.Merge(localIdx)
 	}
 	directNames := make([]string, len(r.DirectDeps))
 	for i, bp := range r.DirectDeps {
