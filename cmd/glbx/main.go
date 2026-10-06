@@ -30,6 +30,8 @@ func main() {
 		err = cmdGraph(args)
 	case "cache":
 		err = cmdCache(args)
+	case "restore-cache":
+		err = cmdRestoreCache(args)
 	case "resolve":
 		err = cmdResolve(args)
 	case "status":
@@ -55,5 +57,5 @@ func main() {
 
 func usage() {
 	fmt.Fprintln(os.Stderr, "usage: glbx <command> [arguments]")
-	fmt.Fprintln(os.Stderr, "commands: import, lockfile, lockfile-rootfs, build, graph, cache, resolve, status, exec-chroot")
+	fmt.Fprintln(os.Stderr, "commands: import, lockfile, lockfile-rootfs, build, graph, cache, restore-cache, resolve, status, exec-chroot")
 }
