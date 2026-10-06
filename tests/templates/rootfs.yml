@@ -1,1 +1,1 @@
-packages: [base-files:base-files, base-passwd:base-passwd, coreutils:coreutils, bash:bash, gcc-16:libgcc-s1, dpkg:dpkg]
+packages: [base-files:base-files, base-passwd:base-passwd, coreutils:coreutils, bash:bash, dpkg:dpkg]

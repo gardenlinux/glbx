@@ -3,11 +3,5 @@ build_options: [nocheck]
 extra_build_env:
 - "DEB_CFLAGS_APPEND=-Wno-error"
 runtime_depends:
-  libc6: [glibc:libc-gconv-modules-extra]
-  libc-dev-bin: [glibc:libc6]
-  libc6-dev: [glibc:libc6, glibc:libc-dev-bin]
-lockfile_deps:
-  libc6: [libgcc-s1]
-  libc-dev-bin: [libgcc-s1]
-  libc-gconv-modules-extra: [libgcc-s1]
-  libc6-dev: [linux-libc-dev, rpcsvc-proto, libgcc-s1]
+  libc6: [glibc:libc-gconv-modules-extra, gcc-16:libgcc-s1]
+  libc-gconv-modules-extra: [gcc-16:libgcc-s1]

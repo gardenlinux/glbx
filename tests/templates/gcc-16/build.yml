@@ -3,4 +3,6 @@ build_options: [nostrap, nopgo, nocheck, nodoc, "nolang=go,ada,fortran,d,m2,rust
 extra_build_env:
   - "DEB_STAGE=rtlibs"
 runtime_depends:
-  libgcc-s1: [gcc-16:gcc-16-base, glibc:libc6]
+  libgcc-s1: [gcc-16:gcc-16-base]
+lockfile_deps:
+  libgcc-s1: [libc6]

@@ -1,5 +1,4 @@
 build_profiles: [nocheck, nodoc]
 build_options: [nocheck]
-build_depends: [glibc:libc6-dev]
 runtime_depends:
-  base-passwd: [cdebconf:libdebconfclient0, libselinux:libselinux1, gcc-16:libgcc-s1]
+  base-passwd: [cdebconf:libdebconfclient0, libselinux:libselinux1, glibc:libc6]

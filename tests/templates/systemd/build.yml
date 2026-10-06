@@ -1,5 +1,4 @@
 build_profiles: [nocheck, noudeb, stage1, noinsttest, nodoc]
 build_options: [nocheck]
-build_depends: [glibc:libc6-dev]
 runtime_depends:
-  libsystemd0: [libcap2:libcap2, libselinux:libselinux1, libzstd:libzstd1, gcc-16:libgcc-s1]
+  libsystemd0: [libcap2:libcap2, libselinux:libselinux1, libzstd:libzstd1, glibc:libc6]

@@ -1,5 +1,4 @@
 build_profiles: [nocheck, pkg.cdebconf.nogtk]
 build_options: [nocheck]
-build_depends: [glibc:libc6-dev]
 runtime_depends:
-  libdebconfclient0: [gcc-16:libgcc-s1]
+  libdebconfclient0: [glibc:libc6]
