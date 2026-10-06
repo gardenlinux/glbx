@@ -1,8 +1,8 @@
 build_profiles: [nocheck, noudeb]
 build_options: [nocheck]
-build_depends: [glibc:libc6-dev, zlib:zlib1g-dev, libzstd:libzstd-dev]
+build_depends: [glibc:libc6-dev]
 runtime_depends:
-  libssl3t64: [openssl:openssl-provider-legacy]
+  libssl3t64: [openssl:openssl-provider-legacy, zlib:zlib1g, libzstd:libzstd1]
   openssl-provider-legacy: [openssl:libssl3t64]
   libssl-dev: [openssl:libssl3t64]
 lockfile_deps:
