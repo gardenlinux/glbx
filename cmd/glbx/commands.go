@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/gardenlinux/glbx/internal/buildcfg"
+	"github.com/gardenlinux/glbx/internal/debian/aptrepo"
 	"github.com/gardenlinux/glbx/internal/lockfile"
 	"github.com/gardenlinux/glbx/internal/log"
 )
@@ -12,6 +13,7 @@ import (
 func cmdLockfile(args []string) error {
 	fs := flag.NewFlagSet("lockfile", flag.ExitOnError)
 	repo := fs.String("repo", "https://deb.debian.org/debian", "APT repository URL")
+	snapshot := fs.String("snapshot", aptrepo.DefaultSnapshotBase, "snapshot archive file endpoint (SHA1-addressed), recorded as a secondary retrieval URL")
 	dist := fs.String("dist", "testing", "distribution")
 	arch := fs.String("arch", buildcfg.HostArch(), "target architecture")
 	cacheDir := fs.String("cache", "", "object-store cache directory")
@@ -30,14 +32,15 @@ func cmdLockfile(args []string) error {
 	ctx, l := rootContext(log.Lockfile)
 
 	result, err := lockfile.Generate(lockfile.Config{
-		Ctx:       ctx,
-		Store:     store,
-		RepoURL:   *repo,
-		Dist:      *dist,
-		Arch:      *arch,
-		OutputDir: *outputDir,
-		PkgName:   fs.Arg(0),
-		Cookie:    *cookie,
+		Ctx:          ctx,
+		Store:        store,
+		RepoURL:      *repo,
+		SnapshotBase: *snapshot,
+		Dist:         *dist,
+		Arch:         *arch,
+		OutputDir:    *outputDir,
+		PkgName:      fs.Arg(0),
+		Cookie:       *cookie,
 	})
 	if err != nil {
 		return err
@@ -50,6 +53,7 @@ func cmdLockfile(args []string) error {
 func cmdLockfileRootfs(args []string) error {
 	fs := flag.NewFlagSet("lockfile-rootfs", flag.ExitOnError)
 	repo := fs.String("repo", "https://deb.debian.org/debian", "APT repository URL")
+	snapshot := fs.String("snapshot", aptrepo.DefaultSnapshotBase, "snapshot archive file endpoint (SHA1-addressed), recorded as a secondary retrieval URL")
 	dist := fs.String("dist", "testing", "distribution")
 	arch := fs.String("arch", buildcfg.HostArch(), "target architecture")
 	cacheDir := fs.String("cache", "", "object-store cache directory")
@@ -64,13 +68,14 @@ func cmdLockfileRootfs(args []string) error {
 	ctx, l := rootContext(log.Lockfile)
 
 	result, err := lockfile.GenerateRootfs(lockfile.RootfsConfig{
-		Ctx:       ctx,
-		Store:     store,
-		RepoURL:   *repo,
-		Dist:      *dist,
-		Arch:      *arch,
-		OutputDir: *outputDir,
-		Cookie:    *cookie,
+		Ctx:          ctx,
+		Store:        store,
+		RepoURL:      *repo,
+		SnapshotBase: *snapshot,
+		Dist:         *dist,
+		Arch:         *arch,
+		OutputDir:    *outputDir,
+		Cookie:       *cookie,
 	})
 	if err != nil {
 		return err

@@ -35,6 +35,11 @@ type Config struct {
 	OutputDir string
 	PkgName   string
 	Cookie    string
+
+	// SnapshotBase is the hash-addressed snapshot file endpoint recorded as a
+	// secondary retrieval URL for each .deb. Empty uses
+	// aptrepo.DefaultSnapshotBase.
+	SnapshotBase string
 }
 
 // Result summarizes a generated lock.
@@ -77,7 +82,7 @@ func Generate(cfg Config) (*Result, error) {
 	}
 
 	depsPath := filepath.Join(pkgDir, "build-deps.yml")
-	if err := writeBuildDeps(depsPath, cfg.RepoURL, packages); err != nil {
+	if err := writeBuildDeps(depsPath, cfg.RepoURL, cfg.SnapshotBase, packages); err != nil {
 		return nil, fmt.Errorf("write build-deps.yml: %w", err)
 	}
 
@@ -112,12 +117,16 @@ func resolveAndFetch(ctx context.Context, store *objstore.Store, l *log.Logger,
 
 // writeBuildDeps serializes the resolved package set as the explicit build-deps
 // YAML: one tool per package, each with its exact version and a single file
-// recording the architecture, content hash, and retrieval URL of its .deb.
-func writeBuildDeps(path, repoURL string, packages []*index.Package) error {
+// recording the architecture, content hash, and retrieval URLs of its .deb. The
+// mirror URL is recorded first and the hash-addressed snapshot URL second.
+func writeBuildDeps(path, repoURL, snapshotBase string, packages []*index.Package) error {
 	doc := toolsDoc{Tools: make([]toolEntry, 0, len(packages))}
 	for _, pkg := range packages {
 		if pkg.SHA256 == "" || pkg.Filename == "" {
 			return fmt.Errorf("package %s: missing hash or filename", pkg.Name)
+		}
+		if pkg.SHA1 == "" {
+			return fmt.Errorf("package %s: missing SHA1 (not fetched)", pkg.Name)
 		}
 		doc.Tools = append(doc.Tools, toolEntry{
 			Name:    pkg.Name,
@@ -125,7 +134,10 @@ func writeBuildDeps(path, repoURL string, packages []*index.Package) error {
 			Files: []fileEntry{{
 				Arch:   pkg.Architecture,
 				SHA256: pkg.SHA256,
-				URLs:   []string{fmt.Sprintf("%s/%s", repoURL, pkg.Filename)},
+				URLs: []string{
+					fmt.Sprintf("%s/%s", repoURL, pkg.Filename),
+					aptrepo.SnapshotURL(snapshotBase, pkg.SHA1, filepath.Base(pkg.Filename)),
+				},
 			}},
 		})
 	}
@@ -306,6 +318,11 @@ type RootfsConfig struct {
 	Arch      string
 	OutputDir string
 	Cookie    string
+
+	// SnapshotBase is the hash-addressed snapshot file endpoint recorded as a
+	// secondary retrieval URL for each .deb. Empty uses
+	// aptrepo.DefaultSnapshotBase.
+	SnapshotBase string
 }
 
 // GenerateRootfs produces rootfs-deps.yml: the Debian packaging infrastructure
@@ -329,7 +346,7 @@ func GenerateRootfs(cfg RootfsConfig) (*Result, error) {
 	}
 
 	depsPath := filepath.Join(cfg.OutputDir, "rootfs-deps.yml")
-	if err := writeBuildDeps(depsPath, cfg.RepoURL, packages); err != nil {
+	if err := writeBuildDeps(depsPath, cfg.RepoURL, cfg.SnapshotBase, packages); err != nil {
 		return nil, fmt.Errorf("write rootfs-deps.yml: %w", err)
 	}
 
@@ -394,6 +411,18 @@ func FetchDebs(ctx context.Context, store *objstore.Store, repoURL string, packa
 			}
 			if store.Blobs.Has(h) {
 				cached.Add(1)
+				r, err := store.Blobs.Open(h)
+				if err != nil {
+					errCh <- fmt.Errorf("open cached %s: %w", p.Name, err)
+					return
+				}
+				sum, err := stream.SHA1Reader(r)
+				r.Close()
+				if err != nil {
+					errCh <- fmt.Errorf("hash cached %s: %w", p.Name, err)
+					return
+				}
+				p.SHA1 = sum
 				return
 			}
 			if p.Filename == "" {
@@ -426,6 +455,7 @@ func FetchDebs(ctx context.Context, store *objstore.Store, repoURL string, packa
 				errCh <- fmt.Errorf("store %s: %w", p.Name, err)
 				return
 			}
+			p.SHA1 = stream.SHA1Bytes(data)
 
 			n := fetched.Add(1)
 			if n%10 == 0 || int(n)+int(cached.Load()) == total {

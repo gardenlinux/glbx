@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 
 	"github.com/gardenlinux/glbx/internal/debian/deb822"
@@ -195,4 +196,20 @@ func ParseReleaseDate(payload []byte) (string, error) {
 		return "", fmt.Errorf("parsing Release stanza: %w", err)
 	}
 	return strings.TrimSpace(stanza["date"]), nil
+}
+
+// DefaultSnapshotBase is the hash-addressed file endpoint of the Debian
+// snapshot archive. Files there are keyed by their SHA-1 digest, independent of
+// any suite or timestamp, which makes a snapshot URL a stable second source for
+// any file already pinned by content.
+const DefaultSnapshotBase = "https://snapshot.debian.org/file"
+
+// SnapshotURL builds the snapshot retrieval URL for a file given its SHA-1
+// digest and name. base is the file endpoint (DefaultSnapshotBase when empty);
+// name becomes the trailing path segment so the download keeps its filename.
+func SnapshotURL(base, sha1, name string) string {
+	if base == "" {
+		base = DefaultSnapshotBase
+	}
+	return fmt.Sprintf("%s/%s/%s", strings.TrimRight(base, "/"), sha1, url.PathEscape(name))
 }

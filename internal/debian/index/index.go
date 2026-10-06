@@ -28,8 +28,12 @@ type Package struct {
 	Breaks       depends.DependencyList
 	Stanza       deb822.Stanza
 	SHA256       string
-	Filename     string
-	Size         int64
+	// SHA1 is computed from the fetched .deb bytes, not read from the index
+	// (the Packages format does not require a SHA1 field). It keys the file in
+	// the snapshot archive.
+	SHA1     string
+	Filename string
+	Size     int64
 }
 
 // Index holds an in-memory representation of a binary package index,

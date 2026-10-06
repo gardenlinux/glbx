@@ -264,3 +264,27 @@ func TestHashReader_ConsistentWithSHA256Reader(t *testing.T) {
 		t.Errorf("HashReader (%s) != SHA256Bytes (%s)", hashReaderResult, sha256BytesResult)
 	}
 }
+
+func TestSHA1Bytes(t *testing.T) {
+	// Known vector.
+	data := []byte("The quick brown fox jumps over the lazy dog")
+	const want = "2fd4e1c67a2d28fced849ee1bb76e7391b93eb12"
+	if got := SHA1Bytes(data); got != want {
+		t.Errorf("SHA1Bytes = %q, want %q", got, want)
+	}
+}
+
+func TestSHA1Reader(t *testing.T) {
+	data := "The quick brown fox jumps over the lazy dog"
+	const want = "2fd4e1c67a2d28fced849ee1bb76e7391b93eb12"
+	got, err := SHA1Reader(strings.NewReader(data))
+	if err != nil {
+		t.Fatalf("SHA1Reader: %v", err)
+	}
+	if got != want {
+		t.Errorf("SHA1Reader = %q, want %q", got, want)
+	}
+	if SHA1Bytes([]byte(data)) != got {
+		t.Errorf("SHA1Reader and SHA1Bytes disagree")
+	}
+}

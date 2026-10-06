@@ -34,6 +34,11 @@ type ImportConfig struct {
 	Keyring   string
 	OutputDir string
 
+	// SnapshotBase is the hash-addressed snapshot file endpoint recorded as a
+	// secondary retrieval URL for each imported file. Empty uses
+	// aptrepo.DefaultSnapshotBase.
+	SnapshotBase string
+
 	NoVerify   bool
 	Cookie     string
 	HTTPClient *http.Client
@@ -112,12 +117,12 @@ func Import(cfg ImportConfig, packageName string) (*ImportResult, error) {
 		return nil, err
 	}
 
-	sourceFiles, err := downloadSourceFiles(cfg, srcPkg)
+	sourceFiles, sourceSHA1, err := downloadSourceFiles(cfg, srcPkg)
 	if err != nil {
 		return nil, fmt.Errorf("importer: downloading source files: %w", err)
 	}
 
-	result, err := extractDebianDir(cfg, srcPkg, sourceFiles)
+	result, err := extractDebianDir(cfg, srcPkg, sourceFiles, sourceSHA1)
 	if err != nil {
 		return nil, err
 	}
@@ -189,7 +194,7 @@ func fetchSourcePackageStanza(cfg ImportConfig, releaseHashes map[string]string,
 // extractDebianDir creates pkgs/<name>/, extracts the debian/ tree according
 // to the package's source format, writes sources.yml, and assembles the
 // ImportResult.
-func extractDebianDir(cfg ImportConfig, srcPkg *sourcePackage, sourceFiles map[string]objstore.Hash) (*ImportResult, error) {
+func extractDebianDir(cfg ImportConfig, srcPkg *sourcePackage, sourceFiles map[string]objstore.Hash, sourceSHA1 map[string]string) (*ImportResult, error) {
 	pkgDir := filepath.Join(cfg.OutputDir, "pkgs", srcPkg.Name)
 	if err := os.MkdirAll(pkgDir, 0o755); err != nil {
 		return nil, fmt.Errorf("importer: creating package directory: %w", err)
@@ -199,7 +204,7 @@ func extractDebianDir(cfg ImportConfig, srcPkg *sourcePackage, sourceFiles map[s
 		return nil, fmt.Errorf("importer: extracting debian directory: %w", err)
 	}
 
-	origEntries := filterOrigEntries(cfg, srcPkg, sourceFiles)
+	origEntries := filterOrigEntries(cfg, srcPkg, sourceFiles, sourceSHA1)
 	if err := writeSourcesYML(pkgDir, origEntries); err != nil {
 		return nil, fmt.Errorf("importer: writing sources.yml: %w", err)
 	}
@@ -303,17 +308,24 @@ func parseFileList(field string) ([]sourceFile, error) {
 }
 
 // downloadSourceFiles downloads all source files for a package and stores them
-// in the object store. Returns a map of filename -> objstore.Hash.
-func downloadSourceFiles(cfg ImportConfig, pkg *sourcePackage) (map[string]objstore.Hash, error) {
+// in the object store. Returns a filename -> objstore.Hash map and a filename
+// -> SHA-1 map; the SHA-1 keys the file in the snapshot archive.
+func downloadSourceFiles(cfg ImportConfig, pkg *sourcePackage) (map[string]objstore.Hash, map[string]string, error) {
 	l := log.From(cfg.Ctx, log.Importer)
 	result := make(map[string]objstore.Hash)
+	sha1s := make(map[string]string)
 
 	for _, f := range pkg.Files {
 		// Check if already in the store
 		existing, err := objstore.NewHash(f.Hash)
 		if err == nil && cfg.Store.Blobs.Has(existing) {
 			l.Debug("cached %s", f.Name)
+			sum, err := blobSHA1(cfg.Store, existing)
+			if err != nil {
+				return nil, nil, fmt.Errorf("hashing cached %s: %w", f.Name, err)
+			}
 			result[f.Name] = existing
+			sha1s[f.Name] = sum
 			continue
 		}
 
@@ -321,37 +333,52 @@ func downloadSourceFiles(cfg ImportConfig, pkg *sourcePackage) (map[string]objst
 		l.Info("downloading %s", fileURL)
 		data, err := httpGet(cfg.HTTPClient, fileURL)
 		if err != nil {
-			return nil, fmt.Errorf("downloading %s: %w", f.Name, err)
+			return nil, nil, fmt.Errorf("downloading %s: %w", f.Name, err)
 		}
 
 		// Verify the downloaded file's hash
 		actualHash := sha256Hex(data)
 		if actualHash != f.Hash {
-			return nil, fmt.Errorf("hash mismatch for %s: got %s, want %s", f.Name, actualHash, f.Hash)
+			return nil, nil, fmt.Errorf("hash mismatch for %s: got %s, want %s", f.Name, actualHash, f.Hash)
 		}
 
 		// Store in object store
 		h, err := cfg.Store.Blobs.Store(bytes.NewReader(data))
 		if err != nil {
-			return nil, fmt.Errorf("storing %s in object store: %w", f.Name, err)
+			return nil, nil, fmt.Errorf("storing %s in object store: %w", f.Name, err)
 		}
 
 		result[f.Name] = h
+		sha1s[f.Name] = stream.SHA1Bytes(data)
 	}
 
-	return result, nil
+	return result, sha1s, nil
+}
+
+// blobSHA1 reads a stored blob and returns the hex-encoded SHA-1 of its bytes,
+// used to key the file in the snapshot archive when the download was skipped.
+func blobSHA1(store *objstore.Store, h objstore.Hash) (string, error) {
+	r, err := store.Blobs.Open(h)
+	if err != nil {
+		return "", err
+	}
+	defer r.Close()
+	return stream.SHA1Reader(r)
 }
 
 // filterOrigEntries returns the orig tarball entries for sources.yml, each
-// recording the archive URL it was retrieved from.
-func filterOrigEntries(cfg ImportConfig, pkg *sourcePackage, files map[string]objstore.Hash) []SourceEntry {
+// recording the archive URL and the snapshot URL it can be retrieved from.
+func filterOrigEntries(cfg ImportConfig, pkg *sourcePackage, files map[string]objstore.Hash, sha1s map[string]string) []SourceEntry {
 	var entries []SourceEntry
 	for _, f := range pkg.Files {
 		if isOrigTarball(f.Name) {
 			entries = append(entries, SourceEntry{
 				Name: f.Name,
 				Hash: files[f.Name],
-				URLs: []string{fmt.Sprintf("%s/%s/%s", cfg.RepoURL, pkg.Directory, f.Name)},
+				URLs: []string{
+					fmt.Sprintf("%s/%s/%s", cfg.RepoURL, pkg.Directory, f.Name),
+					aptrepo.SnapshotURL(cfg.SnapshotBase, sha1s[f.Name], f.Name),
+				},
 			})
 		}
 	}

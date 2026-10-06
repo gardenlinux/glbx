@@ -255,3 +255,39 @@ func TestFetchInReleaseRejectsMissingFields(t *testing.T) {
 		}
 	}
 }
+
+func TestSnapshotURL(t *testing.T) {
+	cases := []struct {
+		name       string
+		base       string
+		sha1, file string
+		want       string
+	}{
+		{
+			name: "default base",
+			sha1: "f322085c1e2f95e8febe24989f776cfac268ff90",
+			file: "hello_2.10-3_amd64.deb",
+			want: "https://snapshot.debian.org/file/f322085c1e2f95e8febe24989f776cfac268ff90/hello_2.10-3_amd64.deb",
+		},
+		{
+			name: "custom base with trailing slash",
+			base: "https://mirror.example/file/",
+			sha1: "abc123",
+			file: "pkg_1.0_amd64.deb",
+			want: "https://mirror.example/file/abc123/pkg_1.0_amd64.deb",
+		},
+		{
+			name: "filename with special characters is escaped",
+			sha1: "deadbeef",
+			file: "lib foo+bar_1:2.3.deb",
+			want: "https://snapshot.debian.org/file/deadbeef/lib%20foo+bar_1:2.3.deb",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := SnapshotURL(tc.base, tc.sha1, tc.file); got != tc.want {
+				t.Errorf("SnapshotURL = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}

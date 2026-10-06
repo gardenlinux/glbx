@@ -4,6 +4,7 @@ import (
 	"flag"
 	"fmt"
 
+	"github.com/gardenlinux/glbx/internal/debian/aptrepo"
 	"github.com/gardenlinux/glbx/internal/importer"
 	"github.com/gardenlinux/glbx/internal/log"
 )
@@ -11,6 +12,7 @@ import (
 func cmdImport(args []string) error {
 	fs := flag.NewFlagSet("import", flag.ExitOnError)
 	repo := fs.String("repo", "https://deb.debian.org/debian", "APT repository URL")
+	snapshot := fs.String("snapshot", aptrepo.DefaultSnapshotBase, "snapshot archive file endpoint (SHA1-addressed), recorded as a secondary retrieval URL")
 	dist := fs.String("dist", "testing", "distribution")
 	keyring := fs.String("keyring", "/usr/share/keyrings/debian-archive-keyring.gpg", "GPG keyring path")
 	cacheDir := fs.String("cache", "", "object-store cache directory")
@@ -32,14 +34,15 @@ func cmdImport(args []string) error {
 	ctx, l := rootContext(log.Importer)
 
 	result, err := importer.Import(importer.ImportConfig{
-		Ctx:       ctx,
-		Store:     store,
-		RepoURL:   *repo,
-		Dist:      *dist,
-		Keyring:   *keyring,
-		OutputDir: *outputDir,
-		NoVerify:  *noVerify,
-		Cookie:    *cookie,
+		Ctx:          ctx,
+		Store:        store,
+		RepoURL:      *repo,
+		SnapshotBase: *snapshot,
+		Dist:         *dist,
+		Keyring:      *keyring,
+		OutputDir:    *outputDir,
+		NoVerify:     *noVerify,
+		Cookie:       *cookie,
 	}, pkgName)
 	if err != nil {
 		return err

@@ -1,6 +1,7 @@
 package stream
 
 import (
+	"crypto/sha1"
 	"crypto/sha256"
 	"encoding/hex"
 	"hash"
@@ -79,5 +80,23 @@ func SHA256Reader(r io.Reader) (string, error) {
 // SHA256Bytes computes the hex-encoded SHA-256 digest of the given byte slice.
 func SHA256Bytes(data []byte) string {
 	sum := sha256.Sum256(data)
+	return hex.EncodeToString(sum[:])
+}
+
+// SHA1Reader reads the entirety of r and returns the hex-encoded SHA-1 digest
+// of the data. Returns an error if reading fails.
+func SHA1Reader(r io.Reader) (string, error) {
+	h := sha1.New()
+	if _, err := io.Copy(h, r); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(h.Sum(nil)), nil
+}
+
+// SHA1Bytes computes the hex-encoded SHA-1 digest of the given byte slice.
+// snapshot.debian.org addresses stored files by their SHA-1, so this provides
+// the key for constructing a snapshot retrieval URL.
+func SHA1Bytes(data []byte) string {
+	sum := sha1.Sum(data)
 	return hex.EncodeToString(sum[:])
 }

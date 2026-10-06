@@ -844,15 +844,23 @@ func TestFilterOrigEntries(t *testing.T) {
 		"hello_2.10.orig-extra.tar.gz": hash3,
 	}
 
-	entries := filterOrigEntries(ImportConfig{RepoURL: "https://deb.debian.org/debian"}, pkg, files)
+	sha1s := map[string]string{
+		"hello_2.10.orig.tar.gz":       "1111111111111111111111111111111111111111",
+		"hello_2.10-3.debian.tar.xz":   "2222222222222222222222222222222222222222",
+		"hello_2.10.orig-extra.tar.gz": "3333333333333333333333333333333333333333",
+	}
+
+	entries := filterOrigEntries(ImportConfig{RepoURL: "https://deb.debian.org/debian"}, pkg, files, sha1s)
 	if len(entries) != 2 {
 		t.Fatalf("expected 2 orig entries, got %d", len(entries))
 	}
 	if entries[0].Name != "hello_2.10.orig.tar.gz" {
 		t.Errorf("wrong first entry: %s", entries[0].Name)
 	}
-	if len(entries[0].URLs) != 1 || entries[0].URLs[0] != "https://deb.debian.org/debian/pool/main/h/hello/hello_2.10.orig.tar.gz" {
-		t.Errorf("wrong first entry url: %v", entries[0].URLs)
+	wantMirror := "https://deb.debian.org/debian/pool/main/h/hello/hello_2.10.orig.tar.gz"
+	wantSnapshot := "https://snapshot.debian.org/file/1111111111111111111111111111111111111111/hello_2.10.orig.tar.gz"
+	if len(entries[0].URLs) != 2 || entries[0].URLs[0] != wantMirror || entries[0].URLs[1] != wantSnapshot {
+		t.Errorf("wrong first entry urls: %v", entries[0].URLs)
 	}
 	if entries[1].Name != "hello_2.10.orig-extra.tar.gz" {
 		t.Errorf("wrong second entry: %s", entries[1].Name)
@@ -948,7 +956,7 @@ func TestDownloadSourceFilesHashMismatch(t *testing.T) {
 		HTTPClient: server.Client(),
 	}
 
-	_, err := downloadSourceFiles(cfg, pkg)
+	_, _, err := downloadSourceFiles(cfg, pkg)
 	if err == nil {
 		t.Fatal("expected hash mismatch error")
 	}

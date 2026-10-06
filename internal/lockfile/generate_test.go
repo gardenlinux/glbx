@@ -21,10 +21,10 @@ func TestWriteBuildDeps(t *testing.T) {
 	path := filepath.Join(dir, "nested", "build-deps.yml")
 
 	pkgs := []*index.Package{
-		{Name: "gcc-14", Version: "14.2.0-3", Architecture: "amd64", SHA256: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", Filename: "pool/main/g/gcc-14/gcc-14_amd64.deb"},
-		{Name: "debhelper", Version: "13.20", Architecture: "all", SHA256: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", Filename: "pool/main/d/debhelper/debhelper_all.deb"},
+		{Name: "gcc-14", Version: "14.2.0-3", Architecture: "amd64", SHA256: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", SHA1: "1111111111111111111111111111111111111111", Filename: "pool/main/g/gcc-14/gcc-14_amd64.deb"},
+		{Name: "debhelper", Version: "13.20", Architecture: "all", SHA256: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", SHA1: "2222222222222222222222222222222222222222", Filename: "pool/main/d/debhelper/debhelper_all.deb"},
 	}
-	if err := writeBuildDeps(path, "https://deb.debian.org/debian", pkgs); err != nil {
+	if err := writeBuildDeps(path, "https://deb.debian.org/debian", "", pkgs); err != nil {
 		t.Fatal(err)
 	}
 
@@ -41,7 +41,10 @@ func TestWriteBuildDeps(t *testing.T) {
 	if len(tools[0].Files) != 1 || tools[0].Files[0].Arch != "amd64" {
 		t.Errorf("tool[0] files = %+v", tools[0].Files)
 	}
-	if got := tools[0].Files[0].URLs; len(got) != 1 || got[0] != "https://deb.debian.org/debian/pool/main/g/gcc-14/gcc-14_amd64.deb" {
+	got := tools[0].Files[0].URLs
+	wantMirror := "https://deb.debian.org/debian/pool/main/g/gcc-14/gcc-14_amd64.deb"
+	wantSnapshot := "https://snapshot.debian.org/file/1111111111111111111111111111111111111111/gcc-14_amd64.deb"
+	if len(got) != 2 || got[0] != wantMirror || got[1] != wantSnapshot {
 		t.Errorf("tool[0] urls = %v", got)
 	}
 }
@@ -49,7 +52,7 @@ func TestWriteBuildDeps(t *testing.T) {
 func TestWriteBuildDepsRejectsMissingHash(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "build-deps.yml")
 	pkgs := []*index.Package{{Name: "x", Version: "1", Architecture: "amd64", Filename: "pool/x.deb"}}
-	if err := writeBuildDeps(path, "https://example", pkgs); err == nil {
+	if err := writeBuildDeps(path, "https://example", "", pkgs); err == nil {
 		t.Fatal("expected error for package with no SHA256")
 	}
 }
@@ -208,6 +211,9 @@ func TestFetchDebsHappyPath(t *testing.T) {
 		if !store.Blobs.Has(h) {
 			t.Errorf("blob missing for %s", p.Name)
 		}
+		if p.SHA1 == "" {
+			t.Errorf("SHA1 not set for %s", p.Name)
+		}
 	}
 }
 
@@ -235,6 +241,9 @@ func TestFetchDebsSkipsAlreadyCached(t *testing.T) {
 	}
 	if hits.Load() != 0 {
 		t.Errorf("server hit %d times, expected 0 (already cached)", hits.Load())
+	}
+	if pkgs[0].SHA1 != "5c748f0a944fd528c52d36396cba33e786035e4f" {
+		t.Errorf("cached SHA1 = %q, want it computed from the stored blob", pkgs[0].SHA1)
 	}
 }
 
