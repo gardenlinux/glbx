@@ -27,7 +27,7 @@ func TestRootfsIdentityChangesWhenTransitiveDepChanges(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		rootfs := newRootfsDirect("img", "amd64", []*debianBinaryPkg{bp}, store)
+		rootfs := newRootfsDirect("amd64", []*debianBinaryPkg{bp}, store)
 		id, err := rootfs.Identity()
 		if err != nil {
 			t.Fatal(err)
@@ -54,7 +54,7 @@ func TestRootfsIdentityStable(t *testing.T) {
 	identity := func() string {
 		ps, _ := NewPackageSet(filepath.Join(root, "pkgs"), "amd64", store, "")
 		bp, _ := ps.Binary("app", "app-bin")
-		id, err := newRootfsDirect("img", "amd64", []*debianBinaryPkg{bp}, store).Identity()
+		id, err := newRootfsDirect("amd64", []*debianBinaryPkg{bp}, store).Identity()
 		if err != nil {
 			t.Fatal(err)
 		}

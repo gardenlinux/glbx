@@ -141,7 +141,6 @@ func BuildGraph(cfg GraphConfig) (*GraphResult, error) {
 	}
 
 	rootfs, err := NewRootfs(RootfsConfig{
-		Name:     "glbx-rootfs",
 		Arch:     cfg.Arch,
 		Store:    cfg.Store,
 		PkgSet:   ps,

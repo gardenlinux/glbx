@@ -28,7 +28,6 @@ import (
 //
 // Final output = Layer 0 + Layer 2 (Layer 1 is discarded).
 type Rootfs struct {
-	Name       string
 	Arch       string
 	DirectDeps []*debianBinaryPkg
 	store      *objstore.Store
@@ -39,7 +38,6 @@ type Rootfs struct {
 
 // RootfsConfig holds the parameters for constructing a new Rootfs artifact.
 type RootfsConfig struct {
-	Name     string
 	Arch     string
 	Store    *objstore.Store
 	PkgSet   *PackageSet
@@ -69,7 +67,6 @@ func NewRootfs(cfg RootfsConfig) (*Rootfs, error) {
 	}
 
 	return &Rootfs{
-		Name:       cfg.Name,
 		Arch:       cfg.Arch,
 		DirectDeps: deps,
 		store:      cfg.Store,
@@ -79,13 +76,12 @@ func NewRootfs(cfg RootfsConfig) (*Rootfs, error) {
 }
 
 func (r *Rootfs) Key() string {
-	return fmt.Sprintf("rootfs:%s:%s", r.Name, r.Arch)
+	return fmt.Sprintf("rootfs:%s", r.Arch)
 }
 
 // newRootfsDirect creates a Rootfs with explicit deps (for testing).
-func newRootfsDirect(name, arch string, deps []*debianBinaryPkg, store *objstore.Store) *Rootfs {
+func newRootfsDirect(arch string, deps []*debianBinaryPkg, store *objstore.Store) *Rootfs {
 	return &Rootfs{
-		Name:       name,
 		Arch:       arch,
 		DirectDeps: deps,
 		store:      store,
@@ -93,7 +89,7 @@ func newRootfsDirect(name, arch string, deps []*debianBinaryPkg, store *objstore
 }
 
 func (r *Rootfs) String() string {
-	return fmt.Sprintf("rootfs:%s", r.Name)
+	return "rootfs"
 }
 
 func (r *Rootfs) Depends() []artifact.Artifact {
@@ -140,7 +136,7 @@ func (r *Rootfs) Identity() (objstore.Hash, error) {
 		return r.identity, nil
 	}
 
-	parts := []string{identityScheme, "rootfs", r.Name, r.Arch}
+	parts := []string{identityScheme, "rootfs", r.Arch}
 
 	// Fold the content hash of every pinned image-tooling file.
 	if tools, err := r.loadImageToolingPins(); err == nil {
@@ -210,7 +206,7 @@ type rootfsPaths struct {
 func (r *Rootfs) Build(ctx artifact.BuildContext) ([]artifact.Output, error) {
 	store := ctx.Store
 	l := log.From(ctx.Ctx, log.Rootfs)
-	l.Info("building rootfs: %s", r.Name)
+	l.Info("building rootfs")
 
 	localPkgs, err := r.collectLocalPkgs(ctx.Inputs)
 	if err != nil {
@@ -275,7 +271,7 @@ func (r *Rootfs) collectLocalPkgs(inputs map[string]objstore.Hash) ([]rootfsLoca
 		}
 	}
 	if len(localPkgs) == 0 {
-		return nil, fmt.Errorf("rootfs %s: no .deb packages to install", r.Name)
+		return nil, fmt.Errorf("rootfs: no .deb packages to install")
 	}
 	return localPkgs, nil
 }

@@ -30,7 +30,7 @@ func cmdBuild(args []string) error {
 	cacheDir := fs.String("cache", "", "cache directory")
 	confDir := fs.String("conf-dir", "", "configuration directory (contains pkgs/, rootfs.yml)")
 	stubPath := fs.String("stub", "", "path to exec_env_stub binary")
-	invalidate := fs.String("invalidate", "", "delete the map entry for the target with this Key (e.g. rootfs:glbx-rootfs:amd64) and exit")
+	invalidate := fs.String("invalidate", "", "delete the map entry for the target with this Key (e.g. rootfs:amd64) and exit")
 	logsOutput := fs.String("logs-output", "", "path to write the build-logs JSON snapshot (default: $TMPDIR/glbx-build-*.json)")
 	fs.Parse(args)
 
