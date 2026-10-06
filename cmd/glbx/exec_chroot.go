@@ -19,7 +19,7 @@ func cmdExecChroot(args []string) error {
 	explore := fs.Bool("explore", false, "skip container creation, exec inside the mount namespace")
 	fs.Usage = func() {
 		fmt.Fprintln(os.Stderr,
-			"usage: glbx exec-chroot [--cache dir] [--explore] <rootfs-hash> -- <cmd> [args...]")
+			"usage: glbx exec-chroot [--cache dir] [--explore] <rootfs-hash> <cmd> [args...]")
 	}
 	if err := fs.Parse(args); err != nil {
 		return err
