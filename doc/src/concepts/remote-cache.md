@@ -229,6 +229,14 @@ alias. A hash that is only in the local store because some *other* checkout buil
 it, and that this checkout's graph does not reach, is simply not enumerated;
 publishing mirrors what the current checkout accounts for, nothing more.
 
+Publishing can be scoped to a single built node, selected by its graph Key. The
+worklist is then just that one node's output blobs, manifest blob, and `map/<id>`
+alias — the built-outputs enumeration above restricted to one node, with no input
+set, since a single node's inputs are the outputs of its dependencies and were
+published when those were built. This is the unit a fanned-out builder publishes:
+one node built, one node published, the registry the only channel between
+builders.
+
 ### The upload: check what exists, push the rest
 
 Publishing a blob is idempotent and content-checked, so the step is a diff, not a

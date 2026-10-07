@@ -1,10 +1,12 @@
 package main
 
 import (
+	"encoding/json"
 	"flag"
 	"fmt"
 	"os"
 
+	"github.com/gardenlinux/glbx/internal/artifact"
 	"github.com/gardenlinux/glbx/internal/build"
 	"github.com/gardenlinux/glbx/internal/buildcfg"
 	"github.com/gardenlinux/glbx/internal/log"
@@ -19,11 +21,16 @@ func cmdGraph(args []string) error {
 	confDir := fs.String("conf-dir", "", "configuration directory (contains pkgs/, rootfs.yml)")
 	stubPath := fs.String("stub", "", "path to exec_env_stub binary")
 	outputFile := fs.String("output", "", "output file (default: stdout)")
+	format := fs.String("format", "mermaid", "output format: mermaid or json")
 	gantt := fs.String("gantt", "", "render mermaid gantt chart from a build logs file (skips graph build)")
 	fs.Parse(args)
 
 	if *gantt != "" {
 		return cmdGraphGantt(*gantt, *outputFile)
+	}
+
+	if *format != "mermaid" && *format != "json" {
+		return fmt.Errorf("unknown format %q (want mermaid or json)", *format)
 	}
 
 	storeDir := *cacheDir
@@ -53,14 +60,19 @@ func cmdGraph(args []string) error {
 		return fmt.Errorf("build graph: %w", err)
 	}
 
-	mermaid := graphResult.Graph.Mermaid()
-
 	var content string
-	content = "# Build Dependency Graph\n\n"
-	content += fmt.Sprintf("Nodes: %d\n\n", graphResult.Graph.Len())
-	content += "```mermaid\n"
-	content += mermaid
-	content += "```\n"
+	if *format == "json" {
+		content, err = graphJSON(graphResult.Graph)
+		if err != nil {
+			return err
+		}
+	} else {
+		content = "# Build Dependency Graph\n\n"
+		content += fmt.Sprintf("Nodes: %d\n\n", graphResult.Graph.Len())
+		content += "```mermaid\n"
+		content += graphResult.Graph.Mermaid()
+		content += "```\n"
+	}
 
 	if *outputFile != "" {
 		if err := os.WriteFile(*outputFile, []byte(content), 0644); err != nil {
@@ -73,6 +85,40 @@ func cmdGraph(args []string) error {
 	}
 
 	return nil
+}
+
+// graphExport is the canonical serialized form of the dependency graph: node
+// Keys in stable topological order and built-from edges sorted deterministically.
+// It records structure only (no identities), so it changes when the graph's
+// shape changes, not on every source edit.
+type graphExport struct {
+	Nodes []string          `json:"nodes"`
+	Edges []graphExportEdge `json:"edges"`
+}
+
+type graphExportEdge struct {
+	From string `json:"from"`
+	To   string `json:"to"`
+}
+
+// graphJSON renders the graph as deterministic, machine-readable JSON with a
+// trailing newline.
+func graphJSON(g *artifact.Graph) (string, error) {
+	order := g.StableTopologicalOrder()
+	nodes := make([]string, len(order))
+	for i, a := range order {
+		nodes[i] = a.Key()
+	}
+	edges := g.Edges()
+	exp := graphExport{Nodes: nodes, Edges: make([]graphExportEdge, len(edges))}
+	for i, e := range edges {
+		exp.Edges[i] = graphExportEdge{From: e.From, To: e.To}
+	}
+	b, err := json.MarshalIndent(exp, "", "  ")
+	if err != nil {
+		return "", fmt.Errorf("marshal graph: %w", err)
+	}
+	return string(b) + "\n", nil
 }
 
 func cmdGraphGantt(logsPath, outputFile string) error {

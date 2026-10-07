@@ -3,6 +3,7 @@ package artifact
 import (
 	"container/heap"
 	"fmt"
+	"sort"
 	"sync"
 )
 
@@ -319,4 +320,32 @@ func (g *Graph) Keys() []string {
 		keys = append(keys, n.artifact.Key())
 	}
 	return keys
+}
+
+// Edge is a built-from dependency: the artifact with Key From must build before
+// the one with Key To.
+type Edge struct {
+	From string
+	To   string
+}
+
+// Edges returns the graph's built-from edges (one per Depends relationship,
+// including the consumer-side includes-closure edges the graph wires), sorted
+// lexicographically by (To, From). The order is deterministic across runs and
+// machines so a serialized export is stable.
+func (g *Graph) Edges() []Edge {
+	var edges []Edge
+	for _, n := range g.nodes {
+		to := n.artifact.Key()
+		for _, dep := range n.deps {
+			edges = append(edges, Edge{From: dep.artifact.Key(), To: to})
+		}
+	}
+	sort.Slice(edges, func(i, j int) bool {
+		if edges[i].To != edges[j].To {
+			return edges[i].To < edges[j].To
+		}
+		return edges[i].From < edges[j].From
+	})
+	return edges
 }

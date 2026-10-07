@@ -15,13 +15,15 @@ import (
 // reads from the local store and writes to the registry, uploading only the
 // blobs and aliases the registry lacks. The worklist is the union of the two
 // enumerations the system already defines: the recorded inputs restore collects
-// and the built outputs garbage collection walks.
+// and the built outputs garbage collection walks. With --target it is scoped to
+// a single built node's manifest, output blobs, and identity alias.
 func cmdPublish(args []string) error {
 	fs := flag.NewFlagSet("publish", flag.ExitOnError)
 	confDir := fs.String("conf-dir", "", "configuration directory (contains pkgs/, rootfs.yml)")
 	arch := fs.String("arch", buildcfg.HostArch(), "target architecture")
 	cacheDir := fs.String("cache", "", "object-store cache directory")
 	registry := fs.String("registry", "", "target registry reference host[:port]/repo (default $GLBX_REGISTRY)")
+	target := fs.String("target", "", "publish only the built node with this Key (e.g. rootfs:amd64)")
 	stubPath := fs.String("stub", "", "path to exec_env_stub binary")
 	fs.Parse(args)
 
@@ -57,14 +59,6 @@ func cmdPublish(args []string) error {
 
 	_, l := rootContext(log.Engine)
 
-	// The recorded inputs: source archives and build-tooling .debs, by hash.
-	inputs, err := restore.InputHashes(confRoot, *arch)
-	if err != nil {
-		return fmt.Errorf("enumerate inputs: %w", err)
-	}
-
-	// The built outputs: every built node's manifest and output blobs, plus the
-	// identity→manifest aliases.
 	graphResult, err := build.BuildGraph(build.GraphConfig{
 		ConfDir:  confRoot,
 		Arch:     *arch,
@@ -74,10 +68,33 @@ func cmdPublish(args []string) error {
 	if err != nil {
 		return fmt.Errorf("build graph: %w", err)
 	}
-	outputBlobs, aliases := graphResult.BuiltOutputs(store)
 
-	// Merge the two enumerations into one deduplicated blob worklist.
-	blobs := dedupHashes(append(inputs, outputBlobs...))
+	var blobs []objstore.Hash
+	var aliases []objstore.MapAlias
+
+	if *target != "" {
+		// Scoped to one node: publish exactly that node's manifest, output
+		// blobs, and identity alias. Its inputs were published by the earlier
+		// jobs that built the node's dependencies.
+		blobs, aliases, err = graphResult.BuiltOutputsFor(store, *target)
+		if err != nil {
+			return err
+		}
+	} else {
+		// The recorded inputs: source archives and build-tooling .debs, by hash.
+		inputs, err := restore.InputHashes(confRoot, *arch)
+		if err != nil {
+			return fmt.Errorf("enumerate inputs: %w", err)
+		}
+
+		// The built outputs: every built node's manifest and output blobs, plus
+		// the identity→manifest aliases.
+		var outputBlobs []objstore.Hash
+		outputBlobs, aliases = graphResult.BuiltOutputs(store)
+
+		// Merge the two enumerations into one deduplicated blob worklist.
+		blobs = dedupHashes(append(inputs, outputBlobs...))
+	}
 	l.Info("publishing to %s: %d blobs, %d aliases (arch %s)", ref, len(blobs), len(aliases), *arch)
 
 	pub, err := objstore.NewPublisher(ref, insecure, store.Blobs)

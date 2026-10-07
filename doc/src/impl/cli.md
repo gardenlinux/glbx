@@ -13,8 +13,9 @@ A hand-rolled subcommand dispatch over `os.Args[1]`, each command owning a
   `--view-logs` replays a saved run, and `--target <Key>` builds only that one
   node — with `--no-recurse` every other node must resolve from the cache (a
   miss is a hard error), so the pair builds exactly one node from cached inputs.
-- `graph` — render the dependency graph as Mermaid, or a Gantt chart from a
-  saved build-logs file.
+- `graph` — render the dependency graph as Mermaid (default), a deterministic
+  machine-readable node/edge export with `--format=json`, or a Gantt chart from
+  a saved build-logs file.
 - `cache` — object-store administration: `status`, keep-set `gc`, and raw
   `blobs` / `map` access.
 - `restore-cache` — populate the object store from the pins in the working tree,
@@ -22,8 +23,9 @@ A hand-rolled subcommand dispatch over `os.Args[1]`, each command owning a
   and verifying each against its pinned hash.
 - `publish` — mirror a checkout's locally-held content to an OCI registry:
   upload every recorded input and built-output blob the registry lacks and set a
-  `map` alias per built identity. Reads the local store, writes the registry, and
-  is idempotent. The target registry is `--registry` or `$GLBX_REGISTRY`.
+  `map` alias per built identity. `--target <Key>` scopes it to one built node's
+  manifest, output blobs, and alias. Reads the local store, writes the registry,
+  and is idempotent. The target registry is `--registry` or `$GLBX_REGISTRY`.
 - `resolve` — resolve package names against an index, with machine-parseable
   output on stdout and logs on stderr.
 - `status` — report the cache root and the discovered working tree.

@@ -185,6 +185,28 @@ func (gr *GraphResult) BuiltOutputs(store *objstore.Store) (blobs []objstore.Has
 	return blobs, aliases
 }
 
+// BuiltOutputsFor collects the blobs and identity→manifest alias of a single
+// built node, selected by Key(). It is the per-node form of BuiltOutputs,
+// publishing exactly one node's result without the whole-graph enumeration.
+func (gr *GraphResult) BuiltOutputsFor(store *objstore.Store, key string) (blobs []objstore.Hash, aliases []objstore.MapAlias, err error) {
+	a := gr.Graph.Find(key)
+	if a == nil {
+		return nil, nil, fmt.Errorf("no artifact with Key %q in graph", key)
+	}
+	manifest, leaves, err := a.OutputRefs(store)
+	if err != nil {
+		return nil, nil, fmt.Errorf("%s not built: %w", key, err)
+	}
+	identity, err := a.Identity()
+	if err != nil {
+		return nil, nil, fmt.Errorf("compute identity for %s: %w", key, err)
+	}
+	blobs = append(blobs, manifest)
+	blobs = append(blobs, leaves...)
+	aliases = append(aliases, objstore.MapAlias{Identity: identity, ManifestHash: manifest})
+	return blobs, aliases, nil
+}
+
 func parseSrcPkg(spec string) (src, pkg string, err error) {
 	parts := strings.SplitN(spec, ":", 2)
 	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {

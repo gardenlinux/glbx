@@ -892,3 +892,41 @@ func TestOutputRefs(t *testing.T) {
 		t.Error("unbuilt.OutputRefs should return an error")
 	}
 }
+
+// TestGraphEdges verifies the edge accessor returns every built-from edge
+// (including consumer-side includes-closure edges) sorted deterministically and
+// stable across repeated calls.
+func TestGraphEdges(t *testing.T) {
+	// C is included by B; A depends on B. The includes-closure wiring gives A a
+	// built-from edge to C as well, so A has edges from both B and C.
+	c := &mockArtifact{name: "C", identity: strings.Repeat("c", 64)}
+	b := &mockArtifact{name: "B", includes: []Artifact{c}, identity: strings.Repeat("b", 64)}
+	a := &mockArtifact{name: "A", deps: []Artifact{b}, identity: strings.Repeat("a", 64)}
+
+	g := NewGraph()
+	g.Add(a)
+	g.Add(b)
+	g.Add(c)
+	if err := g.Build(); err != nil {
+		t.Fatal(err)
+	}
+
+	edges := g.Edges()
+	want := []Edge{{From: "B", To: "A"}, {From: "C", To: "A"}}
+	if len(edges) != len(want) {
+		t.Fatalf("edges: got %v, want %v", edges, want)
+	}
+	for i := range want {
+		if edges[i] != want[i] {
+			t.Fatalf("edge %d: got %v, want %v", i, edges[i], want[i])
+		}
+	}
+
+	// Stable across calls.
+	again := g.Edges()
+	for i := range again {
+		if again[i] != edges[i] {
+			t.Fatalf("edges not stable: %v vs %v", again, edges)
+		}
+	}
+}

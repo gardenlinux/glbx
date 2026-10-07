@@ -170,6 +170,13 @@ graph rebuilds exactly the artifacts that are *built from* it, directly or
 transitively, and nothing else — an Includes edge propagates a runtime closure
 to consumers but never, on its own, triggers a rebuild.
 
+The graph has a canonical serialized form: node Keys in a stable topological
+order and the built-from edges sorted deterministically, identical across runs
+and machines. It records structure, not identity, so it changes when the graph's
+shape changes — a package added or removed — and not on an ordinary source edit.
+A consumer that fans the graph out across independent builders uses it to lay out
+one builder per node and the dependency ordering between them.
+
 The engine's indifference to what an artifact builds is what makes this
 uniform. Introducing a new sort of artifact — a source build, a binary package,
 an image — means writing code that constructs it with the right inputs, edges,
