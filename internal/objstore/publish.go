@@ -83,22 +83,40 @@ func (p *Publisher) EnsureAlias(a MapAlias) (set bool, err error) {
 	return true, nil
 }
 
+// PublishProgress observes a Publish run item by item. done counts items
+// finished so far (1-based) against total, kind is "blob" or "alias", ref names
+// the item (hash or identity), and outcome is a short word: "uploaded",
+// "present", "missing", "set". It is called synchronously after each item, so
+// it must not block for long. A nil progress is ignored.
+type PublishProgress func(done, total int, kind, ref, outcome string)
+
 // Publish mirrors a worklist to the registry: ensure every blob hash, then set
 // every map alias. It is idempotent — a second run over an unchanged worklist
 // uploads nothing. A blob absent from the local store is skipped, not fatal.
-func (p *Publisher) Publish(blobs []Hash, aliases []MapAlias) (PublishResult, error) {
+// progress, when non-nil, is invoked once per item for live reporting.
+func (p *Publisher) Publish(blobs []Hash, aliases []MapAlias, progress PublishProgress) (PublishResult, error) {
 	var res PublishResult
+	total := len(blobs) + len(aliases)
+	done := 0
 	for _, h := range blobs {
 		uploaded, missing, err := p.EnsureBlob(h)
-		switch {
-		case err != nil:
+		if err != nil {
 			return res, err
+		}
+		done++
+		outcome := "present"
+		switch {
 		case missing:
 			res.BlobsMissing++
+			outcome = "missing"
 		case uploaded:
 			res.BlobsUploaded++
+			outcome = "uploaded"
 		default:
 			res.BlobsPresent++
+		}
+		if progress != nil {
+			progress(done, total, "blob", h.Short(), outcome)
 		}
 	}
 	for _, a := range aliases {
@@ -106,10 +124,16 @@ func (p *Publisher) Publish(blobs []Hash, aliases []MapAlias) (PublishResult, er
 		if err != nil {
 			return res, err
 		}
+		done++
+		outcome := "present"
 		if set {
 			res.Aliases++
+			outcome = "set"
 		} else {
 			res.AliasesPresent++
+		}
+		if progress != nil {
+			progress(done, total, "alias", a.Identity.Short(), outcome)
 		}
 	}
 	return res, nil

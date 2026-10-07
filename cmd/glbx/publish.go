@@ -101,7 +101,10 @@ func cmdPublish(args []string) error {
 	if err != nil {
 		return fmt.Errorf("open publisher: %w", err)
 	}
-	res, err := pub.Publish(blobs, aliases)
+	progress := func(done, total int, kind, refName, outcome string) {
+		l.Info("[%d/%d] %s %s %s", done, total, outcome, kind, refName)
+	}
+	res, err := pub.Publish(blobs, aliases, progress)
 	if err != nil {
 		return fmt.Errorf("publish: %w", err)
 	}
