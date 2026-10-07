@@ -57,6 +57,13 @@ single-blob manifest; there is no closure object, no layer list enumerating othe
 blobs, no annotation marking roles. Both store operations become "ensure a
 one-layer manifest exists and give it a tag."
 
+The two namespaces are written conceptually as `blob/<hash>` and `map/<id>`. An
+OCI tag may not contain a slash, so on the wire the separator is a hyphen —
+`blob-<hash>` and `map-<id>` — the hash or identity hex being itself a legal tag
+body well inside the 128-character tag limit. The slashed forms name the
+namespaces throughout this document; the hyphenated forms are their exact wire
+spelling.
+
 ### Why a manifest at all, and why only one layer
 
 A registry will not tag a bare blob — a tag must point at a *manifest*. So the

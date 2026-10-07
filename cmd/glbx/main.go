@@ -32,6 +32,8 @@ func main() {
 		err = cmdCache(args)
 	case "restore-cache":
 		err = cmdRestoreCache(args)
+	case "publish":
+		err = cmdPublish(args)
 	case "resolve":
 		err = cmdResolve(args)
 	case "status":

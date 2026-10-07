@@ -28,12 +28,42 @@ func findConfDir() string {
 	return ""
 }
 
-// openStore opens the object store at dir, or at the default root if empty.
+// openStore opens the object store at dir, or at the default root if empty. When
+// GLBX_REGISTRY names a registry, a pull-through store is composed over the local
+// one so a cold cache is filled from the registry on demand.
 func openStore(dir string) (*objstore.Store, error) {
-	if dir == "" {
-		dir = objstore.DefaultRoot()
+	local, err := objstore.NewLocal(dir)
+	if err != nil {
+		return nil, err
 	}
-	return objstore.Open(dir)
+	ref, insecure := registryFromEnv()
+	if ref == "" {
+		return local, nil
+	}
+	registry, err := objstore.NewRegistry(ref, insecure)
+	if err != nil {
+		return nil, err
+	}
+	return objstore.NewPullThrough(local, registry), nil
+}
+
+// resolveCacheDir resolves the object-store directory a command uses: dir, or
+// the default root when dir is empty. Commands log this rather than asking the
+// store for a path it was handed.
+func resolveCacheDir(dir string) string {
+	if dir == "" {
+		return objstore.DefaultRoot()
+	}
+	return dir
+}
+
+// registryFromEnv reads the remote registry configuration from the environment:
+// GLBX_REGISTRY is the "host[:port]/repo" reference (empty disables the remote),
+// and GLBX_REGISTRY_INSECURE selects plaintext HTTP for a local test registry.
+func registryFromEnv() (ref string, insecure bool) {
+	ref = os.Getenv("GLBX_REGISTRY")
+	insecure = os.Getenv("GLBX_REGISTRY_INSECURE") != ""
+	return ref, insecure
 }
 
 // rootContext returns a context carrying a console log target and a logger for

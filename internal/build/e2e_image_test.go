@@ -43,7 +43,7 @@ func TestImageBuildE2E(t *testing.T) {
 	}
 	stub := requireStubBuild(t)
 
-	store, err := objstore.Open(t.TempDir())
+	store, err := objstore.NewLocal(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}

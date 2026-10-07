@@ -39,7 +39,7 @@ func cmdExecChroot(args []string) error {
 	if storeRoot == "" {
 		storeRoot = objstore.DefaultRoot()
 	}
-	store, err := objstore.Open(storeRoot)
+	store, err := objstore.NewLocal(storeRoot)
 	if err != nil {
 		return fmt.Errorf("open object store: %w", err)
 	}

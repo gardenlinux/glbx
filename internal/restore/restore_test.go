@@ -15,7 +15,7 @@ import (
 
 func testStore(t *testing.T) *objstore.Store {
 	t.Helper()
-	s, err := objstore.Open(t.TempDir())
+	s, err := objstore.NewLocal(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}

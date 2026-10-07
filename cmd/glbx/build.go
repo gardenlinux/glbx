@@ -12,7 +12,6 @@ import (
 	"github.com/gardenlinux/glbx/internal/build"
 	"github.com/gardenlinux/glbx/internal/buildcfg"
 	"github.com/gardenlinux/glbx/internal/log"
-	"github.com/gardenlinux/glbx/internal/objstore"
 	"github.com/gardenlinux/glbx/internal/taskui"
 	"golang.org/x/term"
 )
@@ -39,10 +38,7 @@ func cmdBuild(args []string) error {
 	}
 
 	storeDir := *cacheDir
-	if storeDir == "" {
-		storeDir = objstore.DefaultRoot()
-	}
-	store, err := objstore.Open(storeDir)
+	store, err := openStore(storeDir)
 	if err != nil {
 		return fmt.Errorf("open store: %w", err)
 	}

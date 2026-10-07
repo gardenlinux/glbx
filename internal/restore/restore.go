@@ -221,3 +221,18 @@ func collectItems(confRoot, arch string) ([]item, error) {
 
 	return items, nil
 }
+
+// InputHashes returns the content hashes of every recorded input in the working
+// tree for an architecture — the source archives and build-tooling .debs
+// restore collects. Publishing mirrors exactly this set of inputs to a remote.
+func InputHashes(confRoot, arch string) ([]objstore.Hash, error) {
+	items, err := collectItems(confRoot, arch)
+	if err != nil {
+		return nil, err
+	}
+	hashes := make([]objstore.Hash, len(items))
+	for i, it := range items {
+		hashes[i] = it.hash
+	}
+	return hashes, nil
+}

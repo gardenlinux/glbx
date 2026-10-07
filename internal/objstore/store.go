@@ -19,31 +19,21 @@ func DefaultRoot() string {
 	return filepath.Join(home, ".cache", "glbx")
 }
 
-// Store is the object store: content-addressed blobs and the identity-to-
-// manifest map over one root directory. The two fields are interfaces so a store
-// can be either pure-local or a pull-through cache backed by a remote, without
-// consumers knowing which.
+// Store is the object store: a content-addressed blob store and an identity-to-
+// manifest map. Both fields are interfaces, so a store can be local, backed by a
+// registry, or a pull-through cache composing two others — consumers never know
+// which. The implementations behind the interfaces hold all state; the wrapper
+// holds none.
 type Store struct {
-	root  string
 	Blobs BlobStore
 	Map   MapStore
 }
 
-// Open opens or creates a pure-local store at root, or at DefaultRoot() if root
+// NewLocal opens or creates a local store at root, or at DefaultRoot() if root
 // is empty. The root is resolved to an absolute path so the store can be
 // consulted from inside a sandbox whose working directory differs from the
 // host's.
-func Open(root string) (*Store, error) {
-	return open(root, nil)
-}
-
-// OpenWithRemote opens a store whose reads fall through to remote, filling the
-// local layer on a miss. A nil remote yields a pure-local store.
-func OpenWithRemote(root string, remote Remote) (*Store, error) {
-	return open(root, remote)
-}
-
-func open(root string, remote Remote) (*Store, error) {
+func NewLocal(root string) (*Store, error) {
 	if root == "" {
 		root = DefaultRoot()
 	}
@@ -65,22 +55,32 @@ func open(root string, remote Remote) (*Store, error) {
 	if err != nil {
 		return nil, fmt.Errorf("initializing map: %w", err)
 	}
-
-	s := &Store{root: root}
-	if remote == nil {
-		s.Blobs = blobs
-		s.Map = mapStore
-		return s, nil
-	}
-	ptBlobs := &pullThroughBlobs{local: blobs, remote: remote}
-	s.Blobs = ptBlobs
-	s.Map = &pullThroughMap{local: mapStore, blobs: ptBlobs, remote: remote}
-	return s, nil
+	return &Store{Blobs: blobs, Map: mapStore}, nil
 }
 
-// Root returns the filesystem root of the store.
-func (s *Store) Root() string {
-	return s.root
+// NewRegistry opens a store backed by the OCI registry at ref
+// ("host[:port]/repo"). Its reads resolve against the registry; its write, path,
+// and sweep operations are refused. insecure selects plaintext HTTP for a local
+// test registry. A registry store is only useful composed into a pull-through.
+func NewRegistry(ref string, insecure bool) (*Store, error) {
+	reg, err := parseRegistry(ref, insecure)
+	if err != nil {
+		return nil, err
+	}
+	return &Store{Blobs: &remoteBlobs{reg: reg}, Map: &remoteMap{reg: reg}}, nil
+}
+
+// NewPullThrough composes a near store and a far store into a pull-through
+// cache: reads miss in near fall through to far and are written back into near,
+// so the next read is a near hit; writes and maintenance act on near only. It
+// requires only that both arguments satisfy the store interfaces — neither has
+// to be a local or a registry specifically.
+func NewPullThrough(near, far *Store) *Store {
+	blobs := &pullThroughBlobs{local: near.Blobs, remote: far.Blobs}
+	return &Store{
+		Blobs: blobs,
+		Map:   &pullThroughMap{local: near.Map, blobs: blobs, remote: far.Map},
+	}
 }
 
 // GC reclaims every blob not named in keep, then sweeps the map to drop any

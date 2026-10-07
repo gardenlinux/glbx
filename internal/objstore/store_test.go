@@ -11,12 +11,9 @@ import (
 
 func TestStore_Open(t *testing.T) {
 	dir := t.TempDir()
-	store, err := Open(dir)
+	store, err := NewLocal(dir)
 	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
-	if store.Root() != dir {
-		t.Errorf("Root() = %q, want %q", store.Root(), dir)
+		t.Fatalf("NewLocal: %v", err)
 	}
 	if store.Blobs == nil {
 		t.Error("Blobs should not be nil")
@@ -34,24 +31,22 @@ func TestStore_Open(t *testing.T) {
 
 func TestStore_OpenCreatesDirectory(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "nested", "store")
-	store, err := Open(dir)
-	if err != nil {
-		t.Fatalf("Open: %v", err)
+	if _, err := NewLocal(dir); err != nil {
+		t.Fatalf("NewLocal: %v", err)
 	}
-	if store.Root() != dir {
-		t.Errorf("Root() = %q, want %q", store.Root(), dir)
+	if _, err := os.Stat(filepath.Join(dir, "blobs")); err != nil {
+		t.Errorf("store not created under %q: %v", dir, err)
 	}
 }
 
 func TestStore_OpenEmptyUsesDefault(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("GLBX_CACHE", dir)
-	store, err := Open("")
-	if err != nil {
-		t.Fatalf("Open: %v", err)
+	if _, err := NewLocal(""); err != nil {
+		t.Fatalf("NewLocal: %v", err)
 	}
-	if store.Root() != dir {
-		t.Errorf("Root() = %q, want %q (from GLBX_CACHE)", store.Root(), dir)
+	if _, err := os.Stat(filepath.Join(dir, "blobs")); err != nil {
+		t.Errorf("store not created under GLBX_CACHE %q: %v", dir, err)
 	}
 }
 
@@ -75,7 +70,7 @@ func TestStore_DefaultRootWithoutEnv(t *testing.T) {
 
 func TestStore_EndToEnd(t *testing.T) {
 	dir := t.TempDir()
-	store, err := Open(dir)
+	store, err := NewLocal(dir)
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -109,7 +104,7 @@ func TestStore_EndToEnd(t *testing.T) {
 
 func TestStore_MapValidation(t *testing.T) {
 	dir := t.TempDir()
-	store, err := Open(dir)
+	store, err := NewLocal(dir)
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -130,7 +125,7 @@ func TestStore_MapValidation(t *testing.T) {
 
 func TestStore_Reopen(t *testing.T) {
 	dir := t.TempDir()
-	store1, err := Open(dir)
+	store1, err := NewLocal(dir)
 	if err != nil {
 		t.Fatalf("Open 1: %v", err)
 	}
@@ -139,7 +134,7 @@ func TestStore_Reopen(t *testing.T) {
 	key := MustHash("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1111")
 	store1.Map.Set(key, blobHash, false)
 
-	store2, err := Open(dir)
+	store2, err := NewLocal(dir)
 	if err != nil {
 		t.Fatalf("Open 2: %v", err)
 	}
@@ -159,7 +154,7 @@ func TestStore_Reopen(t *testing.T) {
 // unrelated blob and the map entry that pointed at a now-gone manifest.
 func TestStore_GC(t *testing.T) {
 	dir := t.TempDir()
-	store, err := Open(dir)
+	store, err := NewLocal(dir)
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}

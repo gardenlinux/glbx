@@ -133,7 +133,7 @@ func TestBootstrapAndInstallVim(t *testing.T) {
 		storeDir = envDir
 		os.MkdirAll(storeDir, 0755)
 	}
-	store, err := objstore.Open(storeDir)
+	store, err := objstore.NewLocal(storeDir)
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}

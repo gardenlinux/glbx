@@ -162,6 +162,29 @@ func BuildGraph(cfg GraphConfig) (*GraphResult, error) {
 	}, nil
 }
 
+// BuiltOutputs walks the graph and, for each node that has already been built,
+// collects the blobs its result occupies and the identity→manifest alias that
+// records it. A node not yet built contributes nothing. This is the single
+// enumeration both garbage collection (which keeps the blobs) and publishing
+// (which mirrors the blobs and sets the aliases on a remote) consume.
+func (gr *GraphResult) BuiltOutputs(store *objstore.Store) (blobs []objstore.Hash, aliases []objstore.MapAlias) {
+	for _, key := range gr.Graph.Keys() {
+		a := gr.Graph.Find(key)
+		manifest, leaves, err := a.OutputRefs(store)
+		if err != nil {
+			continue // not built — contributes nothing
+		}
+		identity, err := a.Identity()
+		if err != nil {
+			continue
+		}
+		blobs = append(blobs, manifest)
+		blobs = append(blobs, leaves...)
+		aliases = append(aliases, objstore.MapAlias{Identity: identity, ManifestHash: manifest})
+	}
+	return blobs, aliases
+}
+
 func parseSrcPkg(spec string) (src, pkg string, err error) {
 	parts := strings.SplitN(spec, ":", 2)
 	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {

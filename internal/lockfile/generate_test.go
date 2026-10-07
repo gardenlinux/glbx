@@ -199,7 +199,7 @@ func TestFetchDebsHappyPath(t *testing.T) {
 	})
 	defer srv.Close()
 
-	store, err := objstore.Open(t.TempDir())
+	store, err := objstore.NewLocal(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -221,7 +221,7 @@ func TestFetchDebsSkipsAlreadyCached(t *testing.T) {
 	pkgs, srv := serveFakeDebs(t, map[string][]byte{"pool/a.deb": []byte("preexisting-content")})
 	defer srv.Close()
 
-	store, err := objstore.Open(t.TempDir())
+	store, err := objstore.NewLocal(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -256,7 +256,7 @@ func TestFetchDebsHashMismatch(t *testing.T) {
 	pkgs := []*index.Package{
 		{Name: "evil", Filename: "pool/e.deb", SHA256: sha256Hex([]byte("expected-content"))},
 	}
-	store, err := objstore.Open(t.TempDir())
+	store, err := objstore.NewLocal(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -280,7 +280,7 @@ func TestFetchDebsHTTP404(t *testing.T) {
 	defer srv.Close()
 
 	pkgs := []*index.Package{{Name: "missing", Filename: "pool/m.deb", SHA256: sha256Hex([]byte("x"))}}
-	store, err := objstore.Open(t.TempDir())
+	store, err := objstore.NewLocal(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -295,7 +295,7 @@ func TestFetchDebsSkipsPackageWithEmptySHA(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	store, err := objstore.Open(t.TempDir())
+	store, err := objstore.NewLocal(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -312,7 +312,7 @@ func TestFetchDebsConcurrentBatch(t *testing.T) {
 	pkgs, srv := serveFakeDebs(t, contentByPath)
 	defer srv.Close()
 
-	store, err := objstore.Open(t.TempDir())
+	store, err := objstore.NewLocal(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}

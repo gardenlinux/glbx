@@ -30,7 +30,7 @@ func cmdGraph(args []string) error {
 	if storeDir == "" {
 		storeDir = objstore.DefaultRoot()
 	}
-	store, err := objstore.Open(storeDir)
+	store, err := objstore.NewLocal(storeDir)
 	if err != nil {
 		return fmt.Errorf("open store: %w", err)
 	}

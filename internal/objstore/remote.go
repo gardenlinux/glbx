@@ -1,34 +1,396 @@
 package objstore
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"net/http"
+	"net/url"
 	"os"
+	"strings"
+	"time"
 )
 
-// Remote is the read-only backend a pull-through store falls through to on a
-// local miss. It is consumed only by the pull-through implementations; a store
-// with no remote uses the local implementations directly and never references
-// this type.
-type Remote interface {
-	// OpenBlob fetches a blob by its content hash. Any error (notably one for
-	// which errors.Is(err, os.ErrNotExist) holds) is treated as a miss.
-	OpenBlob(h Hash) (io.ReadCloser, error)
-	// ManifestLeaves returns the leaf outputs an artifact identity resolves to.
-	// ok=false means the identity is absent remotely.
-	ManifestLeaves(identity Hash) (leaves []Output, ok bool, err error)
+// errRemoteReadOnly is returned by the write and path operations of the remote
+// backend. The registry is filled by the separate publish pass, never built
+// into, and has no local file to point at.
+var errRemoteReadOnly = errors.New("remote store is read-only and path-less")
+
+// OCI media types for the minimal durable unit: a one-layer image manifest
+// whose config is the shared empty object and whose single layer is a stored
+// blob.
+const (
+	ociManifestType = "application/vnd.oci.image.manifest.v1+json"
+	ociEmptyType    = "application/vnd.oci.empty.v1+json"
+	ociLayerType    = "application/vnd.oci.image.layer.v1.tar"
+)
+
+// ociEmptyConfig is the shared empty config descriptor every one-layer manifest
+// references: the two-byte object "{}" and its digest. The registry stores it
+// once and every manifest keeps it alive.
+var ociEmptyConfig = descriptor{
+	MediaType: ociEmptyType,
+	Digest:    "sha256:" + hex.EncodeToString(sha256Sum([]byte("{}"))),
+	Size:      2,
 }
 
-// nopRemote is a remote that supplies nothing: every blob is a miss and every
-// identity is absent. It makes a pull-through store behave exactly like a
-// pure-local one, so the pull-through wiring can be composed without a real
-// backend.
-type nopRemote struct{}
-
-func (nopRemote) OpenBlob(h Hash) (io.ReadCloser, error) {
-	return nil, fmt.Errorf("blob %s: %w", h, os.ErrNotExist)
+func sha256Sum(b []byte) []byte {
+	d := sha256.Sum256(b)
+	return d[:]
 }
 
-func (nopRemote) ManifestLeaves(identity Hash) ([]Output, bool, error) {
-	return nil, false, nil
+// isNotExist reports whether err signals an absent remote object (a miss) as
+// opposed to a transport or protocol failure. A miss falls back to the local
+// not-found; any other error is surfaced.
+func isNotExist(err error) bool {
+	return errors.Is(err, os.ErrNotExist)
 }
+
+// descriptor is an OCI content descriptor: a media type, a digest, and a size.
+type descriptor struct {
+	MediaType string `json:"mediaType"`
+	Digest    string `json:"digest"`
+	Size      int64  `json:"size"`
+}
+
+// manifest is a minimal OCI image manifest. A stored blob is wrapped in one of
+// these — the shared empty config and a single layer naming the blob — so a tag
+// has a manifest to root and the registry keeps the blob reachable.
+type manifest struct {
+	SchemaVersion int          `json:"schemaVersion"`
+	MediaType     string       `json:"mediaType"`
+	Config        descriptor   `json:"config"`
+	Layers        []descriptor `json:"layers"`
+}
+
+// oneLayerManifest builds the manifest that wraps a single blob of the given
+// hash and byte size as its one layer.
+func oneLayerManifest(blob Hash, size int64) manifest {
+	return manifest{
+		SchemaVersion: 2,
+		MediaType:     ociManifestType,
+		Config:        ociEmptyConfig,
+		Layers: []descriptor{{
+			MediaType: ociLayerType,
+			Digest:    "sha256:" + blob.String(),
+			Size:      size,
+		}},
+	}
+}
+
+// blobTag and mapTag are the two tag namespaces. A conceptual "blob/<hash>" and
+// "map/<id>" (remote-cache.md) are spelled on the wire with a hyphen, because an
+// OCI tag may not contain a slash; the hash/identity hex is itself a legal tag
+// body.
+func blobTag(h Hash) string { return "blob-" + h.String() }
+func mapTag(id Hash) string { return "map-" + id.String() }
+
+// ociRegistry is a client for one repository on an OCI registry. It speaks the
+// handful of distribution-spec routes the store needs: blob existence, blob
+// pull and push, and manifest get and put by tag.
+type ociRegistry struct {
+	base   *url.URL // scheme://host/v2/<repo>
+	client *http.Client
+}
+
+// parseRegistry turns a reference "host[:port]/repo[/path]" into a client.
+// The scheme is https unless the reference carries an explicit http:// prefix
+// or insecure is set, which selects plaintext for a local test registry.
+func parseRegistry(ref string, insecure bool) (*ociRegistry, error) {
+	scheme := "https"
+	switch {
+	case strings.HasPrefix(ref, "http://"):
+		scheme = "http"
+		ref = strings.TrimPrefix(ref, "http://")
+	case strings.HasPrefix(ref, "https://"):
+		ref = strings.TrimPrefix(ref, "https://")
+	case insecure:
+		scheme = "http"
+	}
+
+	host, repo, ok := strings.Cut(ref, "/")
+	if !ok || host == "" || repo == "" {
+		return nil, fmt.Errorf("registry reference %q must be host/repo", ref)
+	}
+
+	base, err := url.Parse(fmt.Sprintf("%s://%s/v2/%s", scheme, host, repo))
+	if err != nil {
+		return nil, fmt.Errorf("registry reference %q: %w", ref, err)
+	}
+	return &ociRegistry{
+		base:   base,
+		client: &http.Client{Timeout: 10 * time.Minute},
+	}, nil
+}
+
+// digestRef returns the "sha256:<hex>" reference for a hash.
+func digestRef(h Hash) string { return "sha256:" + h.String() }
+
+// urlf builds a URL under the repository base from path segments already joined.
+func (r *ociRegistry) urlf(suffix string) string {
+	return r.base.String() + suffix
+}
+
+// hasBlob reports whether a blob of the given digest is present on the registry.
+func (r *ociRegistry) hasBlob(h Hash) (bool, error) {
+	req, _ := http.NewRequest(http.MethodHead, r.urlf("/blobs/"+digestRef(h)), nil)
+	resp, err := r.client.Do(req)
+	if err != nil {
+		return false, err
+	}
+	resp.Body.Close()
+	switch resp.StatusCode {
+	case http.StatusOK:
+		return true, nil
+	case http.StatusNotFound:
+		return false, nil
+	default:
+		return false, fmt.Errorf("HEAD blob %s: HTTP %d", h, resp.StatusCode)
+	}
+}
+
+// getBlob fetches a blob's bytes by digest.
+func (r *ociRegistry) getBlob(h Hash) (io.ReadCloser, error) {
+	resp, err := r.client.Get(r.urlf("/blobs/" + digestRef(h)))
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode == http.StatusNotFound {
+		resp.Body.Close()
+		return nil, fmt.Errorf("blob %s: %w", h, os.ErrNotExist)
+	}
+	if resp.StatusCode != http.StatusOK {
+		resp.Body.Close()
+		return nil, fmt.Errorf("GET blob %s: HTTP %d", h, resp.StatusCode)
+	}
+	return resp.Body, nil
+}
+
+// putBlob uploads a blob monolithically: a POST opens an upload session, a PUT
+// with the digest query completes it. Uploading content already present is
+// harmless.
+func (r *ociRegistry) putBlob(h Hash, data []byte) error {
+	resp, err := r.client.Post(r.urlf("/blobs/uploads/"), "", nil)
+	if err != nil {
+		return err
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusAccepted {
+		return fmt.Errorf("POST upload for %s: HTTP %d", h, resp.StatusCode)
+	}
+	loc := resp.Header.Get("Location")
+	if loc == "" {
+		return fmt.Errorf("POST upload for %s: no Location header", h)
+	}
+
+	putURL, err := r.resolveLocation(loc)
+	if err != nil {
+		return err
+	}
+	sep := "?"
+	if strings.Contains(putURL, "?") {
+		sep = "&"
+	}
+	putURL += sep + "digest=" + url.QueryEscape(digestRef(h))
+
+	req, err := http.NewRequest(http.MethodPut, putURL, strings.NewReader(string(data)))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/octet-stream")
+	req.ContentLength = int64(len(data))
+	resp, err = r.client.Do(req)
+	if err != nil {
+		return err
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusCreated {
+		return fmt.Errorf("PUT blob %s: HTTP %d", h, resp.StatusCode)
+	}
+	return nil
+}
+
+// resolveLocation turns an upload Location (which may be absolute or
+// repository-relative) into an absolute URL against the registry host.
+func (r *ociRegistry) resolveLocation(loc string) (string, error) {
+	u, err := url.Parse(loc)
+	if err != nil {
+		return "", fmt.Errorf("parsing upload location %q: %w", loc, err)
+	}
+	return r.base.ResolveReference(u).String(), nil
+}
+
+// getManifest fetches the one-layer manifest a tag resolves to.
+func (r *ociRegistry) getManifest(tag string) (*manifest, error) {
+	req, _ := http.NewRequest(http.MethodGet, r.urlf("/manifests/"+tag), nil)
+	req.Header.Set("Accept", ociManifestType)
+	resp, err := r.client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusNotFound {
+		return nil, fmt.Errorf("manifest %s: %w", tag, os.ErrNotExist)
+	}
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("GET manifest %s: HTTP %d", tag, resp.StatusCode)
+	}
+	var m manifest
+	if err := json.NewDecoder(resp.Body).Decode(&m); err != nil {
+		return nil, fmt.Errorf("decoding manifest %s: %w", tag, err)
+	}
+	return &m, nil
+}
+
+// putManifest uploads a one-layer manifest under a tag.
+func (r *ociRegistry) putManifest(tag string, m manifest) error {
+	body, err := json.Marshal(m)
+	if err != nil {
+		return err
+	}
+	req, err := http.NewRequest(http.MethodPut, r.urlf("/manifests/"+tag), strings.NewReader(string(body)))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", ociManifestType)
+	req.ContentLength = int64(len(body))
+	resp, err := r.client.Do(req)
+	if err != nil {
+		return err
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("PUT manifest %s: HTTP %d", tag, resp.StatusCode)
+	}
+	return nil
+}
+
+// tagExists reports whether a tag resolves to a manifest on the registry.
+func (r *ociRegistry) tagExists(tag string) (bool, error) {
+	req, _ := http.NewRequest(http.MethodHead, r.urlf("/manifests/"+tag), nil)
+	req.Header.Set("Accept", ociManifestType)
+	resp, err := r.client.Do(req)
+	if err != nil {
+		return false, err
+	}
+	resp.Body.Close()
+	switch resp.StatusCode {
+	case http.StatusOK:
+		return true, nil
+	case http.StatusNotFound:
+		return false, nil
+	default:
+		return false, fmt.Errorf("HEAD manifest %s: HTTP %d", tag, resp.StatusCode)
+	}
+}
+
+// layerHash reads the single layer digest of a one-layer manifest as a Hash.
+func (m *manifest) layerHash() (Hash, error) {
+	if len(m.Layers) != 1 {
+		return Hash{}, fmt.Errorf("expected one-layer manifest, got %d layers", len(m.Layers))
+	}
+	d := m.Layers[0].Digest
+	hex, ok := strings.CutPrefix(d, "sha256:")
+	if !ok {
+		return Hash{}, fmt.Errorf("layer digest %q is not sha256", d)
+	}
+	return NewHash(hex)
+}
+
+// publishBlob stores a blob durably under its blob-<hash> tag: push the shared
+// empty config, the blob, and the one-layer manifest wrapping it, then tag that
+// manifest. It is idempotent — re-pushing identical content is harmless.
+func (r *ociRegistry) publishBlob(h Hash, data []byte) error {
+	if err := r.putBlob(hashOf(ociEmptyConfig.Digest), []byte("{}")); err != nil {
+		return fmt.Errorf("push empty config: %w", err)
+	}
+	if err := r.putBlob(h, data); err != nil {
+		return fmt.Errorf("push blob %s: %w", h, err)
+	}
+	m := oneLayerManifest(h, int64(len(data)))
+	if err := r.putManifest(blobTag(h), m); err != nil {
+		return fmt.Errorf("tag blob %s: %w", h, err)
+	}
+	return nil
+}
+
+// aliasMap points the map-<id> tag at the one-layer manifest wrapping the
+// manifest blob of the given hash and size — the byte-identical manifest
+// blob-<manifestHash> already names. It introduces no object beyond the extra
+// tag.
+func (r *ociRegistry) aliasMap(id, manifestHash Hash, manifestSize int64) error {
+	m := oneLayerManifest(manifestHash, manifestSize)
+	return r.putManifest(mapTag(id), m)
+}
+
+// hashOf parses a "sha256:<hex>" descriptor digest back into a Hash. It is used
+// only for the shared empty config, whose digest is a compile-time constant.
+func hashOf(digest string) Hash {
+	return MustHash(strings.TrimPrefix(digest, "sha256:"))
+}
+
+// remoteBlobs is the registry-backed BlobStore. A blob is read by resolving its
+// blob-<hash> tag to a one-layer manifest and fetching the single layer. Writes,
+// paths, and sweeps have no meaning on a bare remote and are refused; the
+// pull-through store supplies them from its local member.
+type remoteBlobs struct {
+	reg *ociRegistry
+}
+
+func (b *remoteBlobs) Has(h Hash) bool {
+	ok, err := b.reg.tagExists(blobTag(h))
+	return err == nil && ok
+}
+
+// Open resolves blob-<hash> to its one-layer manifest, reads the single layer's
+// digest, and streams that blob. The bytes verify against the hash that asked
+// for them: an identity-mismatched layer digest or an absent tag is a miss.
+func (b *remoteBlobs) Open(h Hash) (io.ReadCloser, error) {
+	m, err := b.reg.getManifest(blobTag(h))
+	if err != nil {
+		return nil, err
+	}
+	layer, err := m.layerHash()
+	if err != nil {
+		return nil, err
+	}
+	if !layer.Equal(h) {
+		return nil, fmt.Errorf("blob %s: manifest names a different layer %s", h, layer)
+	}
+	return b.reg.getBlob(layer)
+}
+
+func (b *remoteBlobs) Path(Hash) (string, error)            { return "", errRemoteReadOnly }
+func (b *remoteBlobs) Store(io.Reader) (Hash, error)        { return Hash{}, errRemoteReadOnly }
+func (b *remoteBlobs) Delete(Hash) error                    { return errRemoteReadOnly }
+func (b *remoteBlobs) Sweep(map[Hash]struct{}) (int, error) { return 0, errRemoteReadOnly }
+func (b *remoteBlobs) Iterate(func(Hash) error) error       { return errRemoteReadOnly }
+
+// remoteMap is the registry-backed MapStore. An identity is resolved by reading
+// the map-<id> tag's one-layer manifest and returning its single layer's digest,
+// which is the manifest-blob's hash — the map value. The remote parses no
+// manifest-blob bytes; recovering the outputs is the pull-through store's job.
+type remoteMap struct {
+	reg *ociRegistry
+}
+
+func (m *remoteMap) Has(key Hash) bool {
+	ok, err := m.reg.tagExists(mapTag(key))
+	return err == nil && ok
+}
+
+func (m *remoteMap) Get(key Hash) (Hash, error) {
+	man, err := m.reg.getManifest(mapTag(key))
+	if err != nil {
+		return Hash{}, err
+	}
+	return man.layerHash()
+}
+
+func (m *remoteMap) Set(Hash, Hash, bool) error        { return errRemoteReadOnly }
+func (m *remoteMap) Delete(Hash) error                 { return errRemoteReadOnly }
+func (m *remoteMap) Iterate(func(Hash) error) error    { return errRemoteReadOnly }
+func (m *remoteMap) SweepFollowingBlobs() (int, error) { return 0, errRemoteReadOnly }

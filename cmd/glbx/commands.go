@@ -87,11 +87,10 @@ func cmdLockfileRootfs(args []string) error {
 
 func cmdStatus(args []string) error {
 	_, l := rootContext(log.Engine)
-	store, err := openStore("")
-	if err != nil {
+	if _, err := openStore(""); err != nil {
 		return err
 	}
-	l.Info("cache: %s", store.Root())
+	l.Info("cache: %s", resolveCacheDir(""))
 	if confRoot := findConfDir(); confRoot != "" {
 		l.Info("working tree: %s", confRoot)
 	} else {

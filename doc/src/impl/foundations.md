@@ -13,10 +13,14 @@ so the encoding is unambiguous and order-significant.
 A local store is a directory of content-addressed `blobs/` and an
 identity→manifest `map/`, both sharded by the first two hex characters of the
 key. Blobs are written atomically (temp file, hash while writing, rename into
-place). A read-only `Remote` interface serves blobs and map entries by hash; a
-pull-through store composes a local store with a remote so that on a local miss
-it fetches from the remote, writes the bytes locally (re-hashing to verify), and
-re-reads locally — a caller always sees local data. Garbage collection takes a
+place). The same `BlobStore`/`MapStore` interfaces are implemented three ways: a
+local filesystem store, an OCI-registry store (blobs and map entries served over
+the distribution API; writes, paths, and sweeps are refused), and a pull-through
+store composing a local with a remote so that on a local miss it fetches from the
+remote, writes the bytes locally (re-hashing to verify), and re-reads locally — a
+caller always sees local data. A separate `publish` pass fills a registry from a
+local store, uploading every recorded-input and built-output blob the registry
+lacks and setting a `map` alias per built identity. Garbage collection takes a
 caller-supplied keep-set, sweeps blobs against it, then sweeps the map to follow
 the surviving blobs. The store is a pure cache: everything in it is either a
 rebuildable output or a re-fetchable input, so the keep-set is the whole of what

@@ -128,7 +128,7 @@ func TestGraphMissingDep(t *testing.T) {
 
 func TestEngineBuildOrder(t *testing.T) {
 	dir := t.TempDir()
-	store, err := objstore.Open(dir)
+	store, err := objstore.NewLocal(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -196,7 +196,7 @@ func TestEngineBuildOrder(t *testing.T) {
 
 func TestEngineFailure(t *testing.T) {
 	dir := t.TempDir()
-	store, err := objstore.Open(dir)
+	store, err := objstore.NewLocal(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -235,7 +235,7 @@ func TestEngineFailure(t *testing.T) {
 
 func TestEngineCacheHit(t *testing.T) {
 	dir := t.TempDir()
-	store, err := objstore.Open(dir)
+	store, err := objstore.NewLocal(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -272,7 +272,7 @@ func TestEngineCacheHit(t *testing.T) {
 
 func TestEngineParallel(t *testing.T) {
 	dir := t.TempDir()
-	store, err := objstore.Open(dir)
+	store, err := objstore.NewLocal(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -345,7 +345,7 @@ func TestDiscoverCycleDetection(t *testing.T) {
 
 func TestDiscoverEngineRun(t *testing.T) {
 	dir := t.TempDir()
-	store, err := objstore.Open(dir)
+	store, err := objstore.NewLocal(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -411,7 +411,7 @@ func TestDiscoverEngineRun(t *testing.T) {
 
 func TestManifestRoundTrip(t *testing.T) {
 	dir := t.TempDir()
-	store, err := objstore.Open(dir)
+	store, err := objstore.NewLocal(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -471,7 +471,7 @@ func TestManifestRoundTrip(t *testing.T) {
 
 func TestInputResolution(t *testing.T) {
 	dir := t.TempDir()
-	store, err := objstore.Open(dir)
+	store, err := objstore.NewLocal(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -532,7 +532,7 @@ func TestInputResolution(t *testing.T) {
 // only and live in control metadata, not in input/output plumbing.
 func TestInputResolutionExactMatchOnly(t *testing.T) {
 	dir := t.TempDir()
-	store, err := objstore.Open(dir)
+	store, err := objstore.NewLocal(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -596,7 +596,7 @@ func TestInputResolutionExactMatchOnly(t *testing.T) {
 // successfully without forming a build-order constraint between them.
 func TestIncludesCycleAllowed(t *testing.T) {
 	dir := t.TempDir()
-	store, err := objstore.Open(dir)
+	store, err := objstore.NewLocal(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -650,7 +650,7 @@ func TestDependsCycleStillRejected(t *testing.T) {
 // — neither blocks the other.
 func TestIncludesNoBuildOrder(t *testing.T) {
 	dir := t.TempDir()
-	store, err := objstore.Open(dir)
+	store, err := objstore.NewLocal(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -717,7 +717,7 @@ func TestConsumerInheritsIncludesClosure(t *testing.T) {
 
 func TestOutputRefs(t *testing.T) {
 	dir := t.TempDir()
-	store, err := objstore.Open(dir)
+	store, err := objstore.NewLocal(dir)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -65,7 +65,7 @@ func ensureRealnetState() {
 		}
 		sharedRealnet.storeDir = dir
 
-		store, err := objstore.Open(dir)
+		store, err := objstore.NewLocal(dir)
 		if err != nil {
 			sharedRealnet.setupErr = err
 			return

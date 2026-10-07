@@ -138,7 +138,7 @@ func TestFetchBinaryIndexHappyPath(t *testing.T) {
 		{name: "beta", version: "2.0", essential: true},
 	})
 
-	store, err := objstore.Open(t.TempDir())
+	store, err := objstore.NewLocal(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -164,7 +164,7 @@ func TestFetchBinaryIndexCachesPackagesGz(t *testing.T) {
 		{name: "alpha", version: "1.0"},
 	})
 
-	store, err := objstore.Open(t.TempDir())
+	store, err := objstore.NewLocal(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -196,7 +196,7 @@ func TestFetchBinaryIndexHashMismatch(t *testing.T) {
 	// hash advertised in InRelease.
 	fr.packagesGz = append(fr.packagesGz, 0x00)
 
-	store, err := objstore.Open(t.TempDir())
+	store, err := objstore.NewLocal(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -218,7 +218,7 @@ func TestFetchBinaryIndexMissingFromRelease(t *testing.T) {
 		{name: "alpha", version: "1.0"},
 	})
 
-	store, err := objstore.Open(t.TempDir())
+	store, err := objstore.NewLocal(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -271,7 +271,7 @@ func stageControlFile(t *testing.T, outputDir, pkgName, buildDeps string) {
 func TestGenerateEndToEnd(t *testing.T) {
 	fr := newFakeRepo(t, "testing", "amd64", genFixturePkgs())
 
-	store, err := objstore.Open(t.TempDir())
+	store, err := objstore.NewLocal(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -341,7 +341,7 @@ func TestGenerateEndToEnd(t *testing.T) {
 
 func TestGenerateRejectsMissingControl(t *testing.T) {
 	fr := newFakeRepo(t, "testing", "amd64", genFixturePkgs())
-	store, err := objstore.Open(t.TempDir())
+	store, err := objstore.NewLocal(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -379,7 +379,7 @@ func TestGenerateRootfsEndToEnd(t *testing.T) {
 		{name: "mawk", version: "1.3"},
 	})
 
-	store, err := objstore.Open(t.TempDir())
+	store, err := objstore.NewLocal(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}

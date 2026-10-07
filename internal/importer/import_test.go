@@ -94,7 +94,7 @@ func createTarGz(t *testing.T, files map[string]string) []byte {
 func setupTestStore(t *testing.T) *objstore.Store {
 	t.Helper()
 	tmpDir := t.TempDir()
-	store, err := objstore.Open(tmpDir)
+	store, err := objstore.NewLocal(tmpDir)
 	if err != nil {
 		t.Fatal(err)
 	}

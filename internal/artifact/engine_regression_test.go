@@ -22,7 +22,7 @@ import (
 // goroutine may still be blocked on `<-ready` indefinitely.
 func TestEngineRunDoesNotLeakGoroutines(t *testing.T) {
 	dir := t.TempDir()
-	store, err := objstore.Open(dir)
+	store, err := objstore.NewLocal(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -72,7 +72,7 @@ func TestEngineRunDoesNotLeakGoroutines(t *testing.T) {
 // but workers decrement it under `mu` (line 282). This is a data race.
 func TestEngineRunRaceCondition(t *testing.T) {
 	dir := t.TempDir()
-	store, err := objstore.Open(dir)
+	store, err := objstore.NewLocal(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -123,7 +123,7 @@ func TestEngineRunRaceCondition(t *testing.T) {
 // closure." The engine should enforce this at resolve time.
 func TestEngineInputSubsetEnforcement(t *testing.T) {
 	dir := t.TempDir()
-	store, err := objstore.Open(dir)
+	store, err := objstore.NewLocal(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -187,7 +187,7 @@ func TestEngineInputSubsetEnforcement(t *testing.T) {
 // in the graph have been processed (built, cached, failed, or skipped).
 func TestEngineAllNodesComplete(t *testing.T) {
 	dir := t.TempDir()
-	store, err := objstore.Open(dir)
+	store, err := objstore.NewLocal(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -230,7 +230,7 @@ func TestEngineAllNodesComplete(t *testing.T) {
 // continue to build.
 func TestEngineFailurePropagationParallel(t *testing.T) {
 	dir := t.TempDir()
-	store, err := objstore.Open(dir)
+	store, err := objstore.NewLocal(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -293,7 +293,7 @@ func TestEngineFailurePropagationParallel(t *testing.T) {
 // the nodeMap and their outputs are available for input resolution.
 func TestDiscoverTransitiveInputResolution(t *testing.T) {
 	dir := t.TempDir()
-	store, err := objstore.Open(dir)
+	store, err := objstore.NewLocal(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -367,7 +367,7 @@ func TestDiscoverTransitiveInputResolution(t *testing.T) {
 // (which already wires edges) does not double-count deps/pending.
 func TestBuildIdempotent(t *testing.T) {
 	dir := t.TempDir()
-	store, err := objstore.Open(dir)
+	store, err := objstore.NewLocal(dir)
 	if err != nil {
 		t.Fatal(err)
 	}

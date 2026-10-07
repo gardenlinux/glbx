@@ -42,7 +42,7 @@ func cacheStatus(args []string) error {
 	store.Map.Iterate(func(objstore.Hash) error { mapCount++; return nil })
 
 	_, l := rootContext(log.Engine)
-	l.Info("cache: %s", store.Root())
+	l.Info("cache: %s", resolveCacheDir(""))
 	l.Info("blobs: %d, map entries: %d", blobCount, mapCount)
 	return nil
 }
@@ -83,20 +83,11 @@ func cacheGC(args []string) error {
 		if err != nil {
 			return fmt.Errorf("build graph: %w", err)
 		}
-		reachable := 0
-		for _, key := range graphResult.Graph.Keys() {
-			a := graphResult.Graph.Find(key)
-			manifest, leaves, err := a.OutputRefs(store)
-			if err != nil {
-				continue // not built — contributes nothing
-			}
-			keep[manifest] = struct{}{}
-			for _, h := range leaves {
-				keep[h] = struct{}{}
-			}
-			reachable++
+		blobs, _ := graphResult.BuiltOutputs(store)
+		for _, h := range blobs {
+			keep[h] = struct{}{}
 		}
-		l.Info("graph: %d nodes, %d built and reachable", graphResult.Graph.Len(), reachable)
+		l.Info("graph: %d nodes, %d kept blobs", graphResult.Graph.Len(), len(keep))
 	}
 	l.Info("keep-set: %d blobs", len(keep))
 

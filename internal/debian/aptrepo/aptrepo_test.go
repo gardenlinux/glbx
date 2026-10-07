@@ -144,7 +144,7 @@ func TestFetchInReleaseHTTP(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	store, err := objstore.Open(t.TempDir())
+	store, err := objstore.NewLocal(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -174,7 +174,7 @@ func TestFetchInReleaseHTTP404(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	store, err := objstore.Open(t.TempDir())
+	store, err := objstore.NewLocal(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -212,7 +212,7 @@ func TestFetchInReleaseUsesCookieCache(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	store, err := objstore.Open(t.TempDir())
+	store, err := objstore.NewLocal(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -239,7 +239,7 @@ func TestFetchInReleaseUsesCookieCache(t *testing.T) {
 }
 
 func TestFetchInReleaseRejectsMissingFields(t *testing.T) {
-	store, err := objstore.Open(t.TempDir())
+	store, err := objstore.NewLocal(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}

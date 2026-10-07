@@ -26,7 +26,7 @@ func writeSourcePkg(t *testing.T, pkgDir, control, sourcesYML string) {
 
 func newStore(t *testing.T) *objstore.Store {
 	t.Helper()
-	s, err := objstore.Open(t.TempDir())
+	s, err := objstore.NewLocal(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
