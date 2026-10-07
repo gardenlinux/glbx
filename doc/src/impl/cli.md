@@ -43,6 +43,12 @@ reads the local store directly — never through the registry it fills — so it
 ignores `$GLBX_REGISTRY` for reads and takes its target from `--registry` or
 `$GLBX_REGISTRY`.
 
+A registry that requires authentication is reached with `$GLBX_REGISTRY_TOKEN`
+(and `$GLBX_REGISTRY_USER`): on a `401` bearer challenge the client redeems a
+token from the challenge's realm using those credentials as HTTP basic auth,
+caches it, and retries. With no token set, requests go out unauthenticated, as a
+local or anonymous registry expects.
+
 ## `cmd/exec_env_stub`
 
 The sandbox helper — see [Execution environment](./exec-env.md).

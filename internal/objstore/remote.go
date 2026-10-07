@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"os"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -94,6 +95,15 @@ func mapTag(id Hash) string { return "map-" + id.String() }
 type ociRegistry struct {
 	base   *url.URL // scheme://host/v2/<repo>
 	client *http.Client
+
+	// user and pass are the registry credentials used to redeem a bearer token
+	// against a 401 challenge. Empty means no authentication is attempted, which
+	// is correct for an anonymous or local test registry.
+	user string
+	pass string
+
+	mu     sync.Mutex
+	bearer string // cached bearer token, redeemed lazily on the first challenge
 }
 
 // parseRegistry turns a reference "host[:port]/repo[/path]" into a client.
@@ -123,6 +133,8 @@ func parseRegistry(ref string, insecure bool) (*ociRegistry, error) {
 	return &ociRegistry{
 		base:   base,
 		client: &http.Client{Timeout: 10 * time.Minute},
+		user:   os.Getenv("GLBX_REGISTRY_USER"),
+		pass:   os.Getenv("GLBX_REGISTRY_TOKEN"),
 	}, nil
 }
 
@@ -134,10 +146,136 @@ func (r *ociRegistry) urlf(suffix string) string {
 	return r.base.String() + suffix
 }
 
+// do issues an authenticated request, redeeming and caching a bearer token on a
+// 401 Bearer challenge and retrying once. body, when non-nil, is the request
+// payload: it is passed explicitly so the request can be rebuilt for the retry
+// (an http.Request body is single-use). headers set on the first request are
+// reapplied to the retry. With no credentials configured do simply issues the
+// request, so an anonymous or local registry behaves exactly as before.
+func (r *ociRegistry) do(method, url string, body []byte, headers map[string]string) (*http.Response, error) {
+	send := func() (*http.Response, error) {
+		var rdr io.Reader
+		if body != nil {
+			rdr = strings.NewReader(string(body))
+		}
+		req, err := http.NewRequest(method, url, rdr)
+		if err != nil {
+			return nil, err
+		}
+		if body != nil {
+			req.ContentLength = int64(len(body))
+		}
+		for k, v := range headers {
+			req.Header.Set(k, v)
+		}
+		r.mu.Lock()
+		tok := r.bearer
+		r.mu.Unlock()
+		if tok != "" {
+			req.Header.Set("Authorization", "Bearer "+tok)
+		}
+		return r.client.Do(req)
+	}
+
+	resp, err := send()
+	if err != nil {
+		return nil, err
+	}
+	// Redeem a token against a Bearer challenge and retry once. Only attempt it
+	// when credentials are configured and we have not already sent a token.
+	if resp.StatusCode == http.StatusUnauthorized && r.pass != "" {
+		challenge := resp.Header.Get("WWW-Authenticate")
+		resp.Body.Close()
+		if err := r.authenticate(challenge); err != nil {
+			return nil, err
+		}
+		return send()
+	}
+	return resp, nil
+}
+
+// authenticate redeems a bearer token from the realm named in a Bearer
+// WWW-Authenticate challenge, using the configured credentials as HTTP basic
+// auth, and caches it. The challenge looks like:
+//
+//	Bearer realm="https://ghcr.io/token",service="ghcr.io",scope="repository:owner/repo:pull,push"
+func (r *ociRegistry) authenticate(challenge string) error {
+	params := parseChallenge(challenge)
+	realm := params["realm"]
+	if realm == "" {
+		return fmt.Errorf("registry auth: no realm in challenge %q", challenge)
+	}
+
+	u, err := url.Parse(realm)
+	if err != nil {
+		return fmt.Errorf("registry auth: bad realm %q: %w", realm, err)
+	}
+	q := u.Query()
+	if s := params["service"]; s != "" {
+		q.Set("service", s)
+	}
+	if s := params["scope"]; s != "" {
+		q.Set("scope", s)
+	}
+	u.RawQuery = q.Encode()
+
+	req, err := http.NewRequest(http.MethodGet, u.String(), nil)
+	if err != nil {
+		return err
+	}
+	req.SetBasicAuth(r.user, r.pass)
+
+	resp, err := r.client.Do(req)
+	if err != nil {
+		return fmt.Errorf("registry auth: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("registry auth: token endpoint HTTP %d", resp.StatusCode)
+	}
+
+	var tok struct {
+		Token       string `json:"token"`
+		AccessToken string `json:"access_token"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&tok); err != nil {
+		return fmt.Errorf("registry auth: decode token: %w", err)
+	}
+	t := tok.Token
+	if t == "" {
+		t = tok.AccessToken
+	}
+	if t == "" {
+		return fmt.Errorf("registry auth: token endpoint returned no token")
+	}
+
+	r.mu.Lock()
+	r.bearer = t
+	r.mu.Unlock()
+	return nil
+}
+
+// parseChallenge extracts the key="value" parameters from a Bearer
+// WWW-Authenticate header. Keys without the Bearer scheme prefix are ignored.
+func parseChallenge(challenge string) map[string]string {
+	out := make(map[string]string)
+	rest := strings.TrimSpace(challenge)
+	if i := strings.IndexByte(rest, ' '); i >= 0 && strings.EqualFold(rest[:i], "Bearer") {
+		rest = rest[i+1:]
+	}
+	for _, part := range strings.Split(rest, ",") {
+		k, v, ok := strings.Cut(strings.TrimSpace(part), "=")
+		if !ok {
+			continue
+		}
+		out[strings.TrimSpace(k)] = strings.Trim(strings.TrimSpace(v), `"`)
+	}
+	return out
+}
+
 // hasBlob reports whether a blob of the given digest is present on the registry.
 func (r *ociRegistry) hasBlob(h Hash) (bool, error) {
-	req, _ := http.NewRequest(http.MethodHead, r.urlf("/blobs/"+digestRef(h)), nil)
-	resp, err := r.client.Do(req)
+	resp, err := r.do(http.MethodHead, r.urlf("/blobs/"+digestRef(h)), nil, nil)
 	if err != nil {
 		return false, err
 	}
@@ -154,7 +292,7 @@ func (r *ociRegistry) hasBlob(h Hash) (bool, error) {
 
 // getBlob fetches a blob's bytes by digest.
 func (r *ociRegistry) getBlob(h Hash) (io.ReadCloser, error) {
-	resp, err := r.client.Get(r.urlf("/blobs/" + digestRef(h)))
+	resp, err := r.do(http.MethodGet, r.urlf("/blobs/"+digestRef(h)), nil, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -173,7 +311,7 @@ func (r *ociRegistry) getBlob(h Hash) (io.ReadCloser, error) {
 // with the digest query completes it. Uploading content already present is
 // harmless.
 func (r *ociRegistry) putBlob(h Hash, data []byte) error {
-	resp, err := r.client.Post(r.urlf("/blobs/uploads/"), "", nil)
+	resp, err := r.do(http.MethodPost, r.urlf("/blobs/uploads/"), nil, nil)
 	if err != nil {
 		return err
 	}
@@ -196,13 +334,7 @@ func (r *ociRegistry) putBlob(h Hash, data []byte) error {
 	}
 	putURL += sep + "digest=" + url.QueryEscape(digestRef(h))
 
-	req, err := http.NewRequest(http.MethodPut, putURL, strings.NewReader(string(data)))
-	if err != nil {
-		return err
-	}
-	req.Header.Set("Content-Type", "application/octet-stream")
-	req.ContentLength = int64(len(data))
-	resp, err = r.client.Do(req)
+	resp, err = r.do(http.MethodPut, putURL, data, map[string]string{"Content-Type": "application/octet-stream"})
 	if err != nil {
 		return err
 	}
@@ -225,9 +357,7 @@ func (r *ociRegistry) resolveLocation(loc string) (string, error) {
 
 // getManifest fetches the one-layer manifest a tag resolves to.
 func (r *ociRegistry) getManifest(tag string) (*manifest, error) {
-	req, _ := http.NewRequest(http.MethodGet, r.urlf("/manifests/"+tag), nil)
-	req.Header.Set("Accept", ociManifestType)
-	resp, err := r.client.Do(req)
+	resp, err := r.do(http.MethodGet, r.urlf("/manifests/"+tag), nil, map[string]string{"Accept": ociManifestType})
 	if err != nil {
 		return nil, err
 	}
@@ -251,13 +381,7 @@ func (r *ociRegistry) putManifest(tag string, m manifest) error {
 	if err != nil {
 		return err
 	}
-	req, err := http.NewRequest(http.MethodPut, r.urlf("/manifests/"+tag), strings.NewReader(string(body)))
-	if err != nil {
-		return err
-	}
-	req.Header.Set("Content-Type", ociManifestType)
-	req.ContentLength = int64(len(body))
-	resp, err := r.client.Do(req)
+	resp, err := r.do(http.MethodPut, r.urlf("/manifests/"+tag), body, map[string]string{"Content-Type": ociManifestType})
 	if err != nil {
 		return err
 	}
@@ -270,9 +394,7 @@ func (r *ociRegistry) putManifest(tag string, m manifest) error {
 
 // tagExists reports whether a tag resolves to a manifest on the registry.
 func (r *ociRegistry) tagExists(tag string) (bool, error) {
-	req, _ := http.NewRequest(http.MethodHead, r.urlf("/manifests/"+tag), nil)
-	req.Header.Set("Accept", ociManifestType)
-	resp, err := r.client.Do(req)
+	resp, err := r.do(http.MethodHead, r.urlf("/manifests/"+tag), nil, map[string]string{"Accept": ociManifestType})
 	if err != nil {
 		return false, err
 	}

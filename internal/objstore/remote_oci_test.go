@@ -263,3 +263,124 @@ func newLocalForTest(t *testing.T) BlobStore {
 	}
 	return s.Blobs
 }
+
+// TestOCI_BearerAuth exercises the 401-challenge → token → retry flow. The fake
+// registry rejects unauthenticated requests with a Bearer challenge pointing at
+// a token endpoint, which issues a token for the right basic-auth credentials.
+// The client must redeem and attach it transparently.
+func TestOCI_BearerAuth(t *testing.T) {
+	fake := newFakeOCIRegistry()
+
+	const user, pass, token = "x-access-token", "s3cret-pat", "issued-bearer-token"
+
+	mux := http.NewServeMux()
+	// Token endpoint: basic-auth gate, returns a bearer token.
+	mux.HandleFunc("/token", func(w http.ResponseWriter, r *http.Request) {
+		u, p, ok := r.BasicAuth()
+		if !ok || u != user || p != pass {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"token":"` + token + `"}`))
+	})
+
+	var tokenRedemptions int
+	var muCount sync.Mutex
+	// Registry routes: require Bearer token, else challenge.
+	authGate := func(next http.Handler) http.HandlerFunc {
+		return func(w http.ResponseWriter, r *http.Request) {
+			if r.Header.Get("Authorization") != "Bearer "+token {
+				realm := "http://" + r.Host + "/token"
+				w.Header().Set("WWW-Authenticate",
+					`Bearer realm="`+realm+`",service="fake",scope="repository:glbx-test:pull,push"`)
+				w.WriteHeader(http.StatusUnauthorized)
+				return
+			}
+			next.ServeHTTP(w, r)
+		}
+	}
+	mux.Handle("/v2/", authGate(fake))
+	mux.HandleFunc("/upload/", func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer "+token {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		fake.uploadHandler(w, r)
+	})
+	// Count redemptions by wrapping the token mux.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/token" {
+			muCount.Lock()
+			tokenRedemptions++
+			muCount.Unlock()
+		}
+		mux.ServeHTTP(w, r)
+	}))
+	t.Cleanup(srv.Close)
+
+	ref := strings.TrimPrefix(srv.URL, "http://") + "/glbx-test"
+	reg, err := parseRegistry("http://"+ref, false)
+	if err != nil {
+		t.Fatalf("parseRegistry: %v", err)
+	}
+	reg.user, reg.pass = user, pass
+
+	// A full publish+resolve round-trip must succeed through the auth gate.
+	content := []byte("authenticated blob")
+	h := HashBytes(content)
+	if err := reg.publishBlob(h, content); err != nil {
+		t.Fatalf("publishBlob through auth: %v", err)
+	}
+	rb := &remoteBlobs{reg: reg}
+	if !rb.Has(h) {
+		t.Error("published blob should exist")
+	}
+	rc, err := rb.Open(h)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	got, _ := io.ReadAll(rc)
+	rc.Close()
+	if string(got) != string(content) {
+		t.Errorf("blob content %q, want %q", got, content)
+	}
+
+	// The token is cached: many requests, but far fewer redemptions than requests
+	// (ideally one). Assert it did not redeem on every single request.
+	muCount.Lock()
+	n := tokenRedemptions
+	muCount.Unlock()
+	if n == 0 {
+		t.Error("expected at least one token redemption")
+	}
+	if n > 3 {
+		t.Errorf("token not cached: %d redemptions for a handful of requests", n)
+	}
+}
+
+// TestOCI_BearerAuthWrongCreds confirms bad credentials surface as an error
+// rather than silently proceeding.
+func TestOCI_BearerAuthWrongCreds(t *testing.T) {
+	fake := newFakeOCIRegistry()
+	mux := http.NewServeMux()
+	mux.HandleFunc("/token", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+	})
+	mux.Handle("/v2/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("WWW-Authenticate",
+			`Bearer realm="http://`+r.Host+`/token",service="fake"`)
+		w.WriteHeader(http.StatusUnauthorized)
+		_ = fake
+	}))
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+
+	ref := strings.TrimPrefix(srv.URL, "http://") + "/glbx-test"
+	reg, _ := parseRegistry("http://"+ref, false)
+	reg.user, reg.pass = "bad", "creds"
+
+	if err := reg.publishBlob(HashBytes([]byte("x")), []byte("x")); err == nil {
+		t.Error("expected publish to fail with bad credentials")
+	}
+}
