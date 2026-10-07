@@ -11,8 +11,9 @@ A hand-rolled subcommand dispatch over `os.Args[1]`, each command owning a
 - `build` — drive the engine over the discovered artifact graph, with the
   interactive progress UI; `--invalidate` drops a target's cache entry,
   `--view-logs` replays a saved run, and `--target <Key>` builds only that one
-  node — with `--no-recurse` every other node must resolve from the cache (a
-  miss is a hard error), so the pair builds exactly one node from cached inputs.
+  node — with `--no-recurse` the target's dependencies must resolve from the
+  cache (a missing dependency fails the target), so the pair builds exactly one
+  node from cached inputs and its exit status reflects the target alone.
   `--stream` (with `--target` + `--no-recurse`) forwards the target's logs live
   to the console instead of the UI, for a legible build log on a CI runner.
 - `graph` — render the dependency graph as Mermaid (default), a deterministic

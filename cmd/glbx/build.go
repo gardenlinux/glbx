@@ -110,6 +110,28 @@ func cmdBuild(args []string) error {
 		return fmt.Errorf("run engine: %w", err)
 	}
 
+	// With a single target, only the target's own result decides success: the
+	// engine still walks the whole graph, so unrelated nodes that cannot resolve
+	// from cache under --no-recurse report errors that are not this job's
+	// concern. A real missing dependency still fails the target, because the
+	// engine skips a node whose dependency was absent.
+	if *target != "" {
+		var targetResult *artifact.BuildResult
+		for i := range results {
+			if results[i].Artifact.Key() == *target {
+				targetResult = &results[i]
+				break
+			}
+		}
+		if targetResult == nil {
+			return fmt.Errorf("target %s produced no result", *target)
+		}
+		if targetResult.Err != nil {
+			return fmt.Errorf("%s: %w", *target, targetResult.Err)
+		}
+		return nil
+	}
+
 	var failed int
 	for _, r := range results {
 		if r.Err != nil {

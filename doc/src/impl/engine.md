@@ -22,8 +22,9 @@ Scoping the engine to a single node restricts the build to one target Key and,
 in require-cache mode, forbids building anything else: every non-target node
 must resolve from the (pull-through) cache, and a miss becomes a hard error
 whose dependents are skipped. This builds exactly the target, pulling all of its
-inputs from the cache and failing loudly if an input the graph says must exist
-has not been published.
+inputs from the cache; a dependency the graph says must exist but that has not
+been published skips the target, so the outcome turns on the target's own result
+and unrelated nodes left unresolved do not count against it.
 
 The progress UI captures each node's logs into its own task buffer. A streaming
 mode reuses that same buffer and its log printer — the one the interactive view

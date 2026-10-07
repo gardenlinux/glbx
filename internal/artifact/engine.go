@@ -196,12 +196,12 @@ func (e *Engine) RunWithUI(ctx context.Context, logsOutput string) ([]BuildResul
 		viewer.Stop()
 	}
 
-	fmt.Fprintf(os.Stderr, "\n")
-	tracker.PrintPlain()
-
-	// Streaming is the "one node, logs already on the console" mode — the UI
-	// snapshot and its view-logs hint add nothing, so skip them.
+	// Streaming is the single-target mode: the target's own logs already went to
+	// the console, so the whole-graph status table and the UI snapshot (with its
+	// view-logs hint) are noise. Everything else prints the summary table.
 	if !e.stream {
+		fmt.Fprintf(os.Stderr, "\n")
+		tracker.PrintPlain()
 		f, ferr := openLogsOutput(logsOutput)
 		if ferr == nil {
 			if serErr := tracker.Serialize(f); serErr == nil {
