@@ -9,8 +9,7 @@ import (
 )
 
 // SerializeManifest encodes outputs in the manifest format via
-// objstore.SerializeManifest, the single source of truth for the byte format,
-// so pull-through reconstruction matches the engine's output exactly.
+// objstore.SerializeManifest, the single source of truth for the byte format.
 func SerializeManifest(outputs []Output) string {
 	oo := make([]objstore.Output, len(outputs))
 	for i, o := range outputs {

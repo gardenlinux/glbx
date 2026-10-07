@@ -168,17 +168,20 @@ func TestStore_Blobs_DigestMismatchIsMiss(t *testing.T) {
 	fr := newFakeRemote()
 	claimed := MustHash("1111111111111111111111111111111111111111111111111111111111111111")
 	fr.blobs.blobs[claimed.String()] = []byte("not what the hash says")
-	s, _ := storeWithRemote(t, fr)
+	s, local := storeWithRemote(t, fr)
 
+	// Open enforces integrity: it hashes the pulled bytes and rejects them when
+	// they do not match the requested digest, so a mismatched remote blob never
+	// becomes a successful read and is never materialized under the claimed hash.
 	if _, err := s.Blobs.Open(claimed); err == nil {
 		t.Error("Open on digest-mismatched remote blob should not succeed")
 	}
-	if s.Blobs.Has(claimed) {
-		t.Error("digest-mismatched blob must not be present under the claimed hash")
+	if local.Blobs.Has(claimed) {
+		t.Error("digest-mismatched blob must not be materialized under the claimed hash")
 	}
 }
 
-func TestStore_Map_PullsManifestAndOutputs(t *testing.T) {
+func TestStore_Map_ResolvesAndMaterializesValueOnly(t *testing.T) {
 	fr := newFakeRemote()
 
 	leaf1 := fr.put([]byte("rootfs-tarball-bytes"))
@@ -189,7 +192,7 @@ func TestStore_Map_PullsManifestAndOutputs(t *testing.T) {
 	}
 	identity := MustHash("2222222222222222222222222222222222222222222222222222222222222222")
 	wantManifest := fr.publish(identity, leaves)
-	s, _ := storeWithRemote(t, fr)
+	s, local := storeWithRemote(t, fr)
 
 	manifestHash, err := s.Map.Get(identity)
 	if err != nil {
@@ -198,10 +201,29 @@ func TestStore_Map_PullsManifestAndOutputs(t *testing.T) {
 	if !manifestHash.Equal(wantManifest) {
 		t.Errorf("manifest hash %s, want %s", manifestHash, wantManifest)
 	}
+	// Resolving the map entry materializes only the one blob it points at — the
+	// map treats that hash opaquely and never reads it. The outputs that blob
+	// happens to name are not touched: resolvable through the pull-through (Has
+	// sees the remote) but not copied locally until actually opened.
+	if !local.Blobs.Has(manifestHash) {
+		t.Error("map resolution should materialize the pointed-at blob locally")
+	}
 	for _, l := range leaves {
 		if !s.Blobs.Has(l.Hash) {
-			t.Errorf("leaf %s not pulled", l.Hash)
+			t.Errorf("leaf %s should be resolvable through the remote", l.Hash)
 		}
+		if local.Blobs.Has(l.Hash) {
+			t.Errorf("leaf %s should not be materialized locally before it is opened", l.Hash)
+		}
+	}
+	// Opening a leaf materializes it.
+	rc0, err := s.Blobs.Open(leaf1)
+	if err != nil {
+		t.Fatalf("open leaf: %v", err)
+	}
+	rc0.Close()
+	if !local.Blobs.Has(leaf1) {
+		t.Error("opening a leaf should materialize it locally")
 	}
 	rc, err := s.Blobs.Open(manifestHash)
 	if err != nil {

@@ -120,8 +120,11 @@ func Restore(cfg Config) (Result, error) {
 func fetchItem(cfg Config, it item) (bool, error) {
 	l := log.From(cfg.Ctx, log.Fetch)
 
-	// Blobs.Has pulls through the remote (when one is configured) before
-	// answering, so a hit here already means the blob is local.
+	// Blobs.Has reports existence across the local store and the remote (when
+	// one is configured) without materializing: a blob already on the registry
+	// counts as present and is not downloaded to this runner. The build stage
+	// pulls what it actually needs. Only a blob absent everywhere is fetched
+	// from its recorded URLs below.
 	if cfg.Store.Blobs.Has(it.hash) {
 		l.Debug("cached %s (%s)", it.label, it.hash.Short())
 		return false, nil

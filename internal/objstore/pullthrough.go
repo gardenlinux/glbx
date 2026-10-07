@@ -7,7 +7,9 @@ import (
 
 // pullThroughBlobs is a BlobStore that satisfies a read miss from a remote
 // BlobStore, writing the pulled bytes into the local layer so the next read is a
-// local hit. Writes and maintenance act on the local layer only.
+// local hit. Materialization is lazy: it happens when the bytes are actually
+// read (Open/Path), not on a mere existence check (Has). Writes and maintenance
+// act on the local layer only.
 type pullThroughBlobs struct {
 	local  BlobStore
 	remote BlobStore
@@ -30,9 +32,12 @@ func (p *pullThroughBlobs) ensure(h Hash) {
 	_, _ = p.local.Store(rc)
 }
 
+// Has reports existence without materializing: a blob present locally or on the
+// remote (a remote existence check is a cheap HEAD) answers true, but the bytes
+// are not pulled. A caller that then needs the content calls Open or Path, which
+// materialize it. This keeps an existence probe from dragging the blob to disk.
 func (p *pullThroughBlobs) Has(h Hash) bool {
-	p.ensure(h)
-	return p.local.Has(h)
+	return p.local.Has(h) || p.remote.Has(h)
 }
 
 func (p *pullThroughBlobs) Open(h Hash) (io.ReadCloser, error) {
@@ -53,11 +58,11 @@ func (p *pullThroughBlobs) Sweep(keep map[Hash]struct{}) (int, error) {
 func (p *pullThroughBlobs) Iterate(fn func(Hash) error) error { return p.local.Iterate(fn) }
 
 // pullThroughMap is a MapStore that reconstructs an absent entry from a remote
-// MapStore. On a local miss it resolves the identity to its manifest-blob hash,
-// pulls that manifest blob through blobs, reads it to recover the output list,
-// pulls each output blob through blobs, and records the local entry pointing at
-// the now-present manifest blob — turning the miss into a permanent local hit.
-// Writes and maintenance act on the local layer only.
+// MapStore. On a local miss it resolves the identity to the hash it points at,
+// materializes that one blob locally, and records the local entry — turning the
+// miss into a permanent local hit. It treats the pointed-at hash opaquely: it
+// does not read the blob or know what the value refers to. Writes and
+// maintenance act on the local layer only.
 type pullThroughMap struct {
 	local  MapStore
 	blobs  BlobStore
@@ -71,7 +76,7 @@ func (p *pullThroughMap) Get(key Hash) (Hash, error) {
 		return h, nil
 	}
 
-	manifestHash, err := p.remote.Get(key)
+	value, err := p.remote.Get(key)
 	if err != nil {
 		// A remote miss falls back to the local not-found; a transport error
 		// surfaces so a genuine failure is not mistaken for an absent entry.
@@ -81,28 +86,19 @@ func (p *pullThroughMap) Get(key Hash) (Hash, error) {
 		return Hash{}, err
 	}
 
-	// Pulling the manifest blob through blobs materializes it locally and
-	// verifies its bytes against manifestHash.
-	rc, err := p.blobs.Open(manifestHash)
+	// Materialize the pointed-at blob locally, verifying its bytes against the
+	// hash, so the validated local Set below can reference it. What the blob
+	// contains is the caller's concern, not the map's.
+	rc, err := p.blobs.Open(value)
 	if err != nil {
-		return Hash{}, fmt.Errorf("pull manifest blob %s: %w", manifestHash, err)
+		return Hash{}, fmt.Errorf("pull map value %s: %w", value, err)
 	}
-	outputs, err := ParseManifest(rc)
 	rc.Close()
-	if err != nil {
-		return Hash{}, fmt.Errorf("parse pulled manifest %s: %w", manifestHash, err)
-	}
 
-	for _, out := range outputs {
-		if !p.blobs.Has(out.Hash) {
-			return Hash{}, fmt.Errorf("pull output %s: not available", out.Hash)
-		}
-	}
-
-	if err := p.local.Set(key, manifestHash, true); err != nil {
+	if err := p.local.Set(key, value, true); err != nil {
 		return Hash{}, fmt.Errorf("set map after pull-through: %w", err)
 	}
-	return manifestHash, nil
+	return value, nil
 }
 
 func (p *pullThroughMap) Set(key, value Hash, validate bool) error {
