@@ -25,5 +25,11 @@ whose dependents are skipped. This builds exactly the target, pulling all of its
 inputs from the cache and failing loudly if an input the graph says must exist
 has not been published.
 
+The progress UI captures each node's logs into its own task buffer. A streaming
+mode reuses that same buffer and its log printer — the one the interactive view
+attaches when a task is entered — but without any UI: it forwards the single
+target's logs straight to the console for the whole run, so a non-interactive
+runner shows the build as it happens rather than a status summary after the fact.
+
 A mock artifact drives the whole traversal, cache, and scheduler in tests,
 proving the engine is indifferent to what an artifact builds.

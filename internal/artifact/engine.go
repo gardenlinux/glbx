@@ -31,6 +31,10 @@ type Engine struct {
 	// (pull-through) cache.
 	target    string
 	noRecurse bool
+
+	// stream forwards the target node's logs live to the console instead of
+	// driving the task UI. Only meaningful alongside a single target.
+	stream bool
 }
 
 func NewEngine(g *Graph, store *objstore.Store, workers int) *Engine {
@@ -51,6 +55,15 @@ func NewEngine(g *Graph, store *objstore.Store, workers int) *Engine {
 func (e *Engine) SetScope(target string, noRecurse bool) {
 	e.target = target
 	e.noRecurse = noRecurse
+}
+
+// SetStream makes RunWithUI forward the target node's logs live to the console
+// rather than drive the interactive overview or the non-interactive dot viewer.
+// It reuses the per-task log buffer the UI already fills: a single log printer
+// is attached to the target's task for the whole run. Intended for a
+// single-target no-recurse build, where only the target does real work.
+func (e *Engine) SetStream(stream bool) {
+	e.stream = stream
 }
 
 // runHooks observes engine state transitions during run().
@@ -100,8 +113,18 @@ func (e *Engine) RunWithUI(ctx context.Context, logsOutput string) ([]BuildResul
 	interactive := term.IsTerminal(int(os.Stdout.Fd())) && term.IsTerminal(int(os.Stderr.Fd()))
 	var overview *taskui.TaskOverview
 	var viewer *taskui.NonInteractiveViewer
+	var streamPrinter *log.LogPrinter
 
-	if interactive {
+	switch {
+	case e.stream:
+		// Forward one target's logs live, reusing the same per-task buffer and
+		// log printer the interactive overview attaches on entry — no UI, just
+		// the forwarder. The target's task.Log fills via the nodeStarted hook.
+		if t, ok := taskMap[e.target]; ok {
+			streamPrinter = log.NewLogPrinter(t.Log)
+			streamPrinter.Run()
+		}
+	case interactive:
 		overview = taskui.NewTaskOverview(tracker)
 		overview.OnEnter = func(task *taskui.Task, stop <-chan struct{}) {
 			fmt.Fprintf(os.Stderr, "--- logs: %s (press q to return) ---\n", task.Name)
@@ -131,7 +154,7 @@ func (e *Engine) RunWithUI(ctx context.Context, logsOutput string) ([]BuildResul
 			fmt.Fprintf(os.Stderr, "--- end logs ---\n")
 		}
 		overview.Show()
-	} else {
+	default:
 		viewer = taskui.NewNonInteractiveViewer(tracker)
 		viewer.Start()
 	}
@@ -162,23 +185,32 @@ func (e *Engine) RunWithUI(ctx context.Context, logsOutput string) ([]BuildResul
 
 	results, err := e.run(ctx, hooks)
 
-	if interactive {
+	switch {
+	case e.stream:
+		if streamPrinter != nil {
+			streamPrinter.Stop()
+		}
+	case interactive:
 		overview.Hide()
-	} else {
+	default:
 		viewer.Stop()
 	}
 
 	fmt.Fprintf(os.Stderr, "\n")
 	tracker.PrintPlain()
 
-	f, ferr := openLogsOutput(logsOutput)
-	if ferr == nil {
-		if serErr := tracker.Serialize(f); serErr == nil {
-			f.Close()
-			total := len(tracker.Tasks())
-			fmt.Fprintf(os.Stderr, "\nCompleted %d tasks. Logs written to: %s. Investigate logs with:\n%s build --view-logs %s\n", total, f.Name(), os.Args[0], f.Name())
-		} else {
-			f.Close()
+	// Streaming is the "one node, logs already on the console" mode — the UI
+	// snapshot and its view-logs hint add nothing, so skip them.
+	if !e.stream {
+		f, ferr := openLogsOutput(logsOutput)
+		if ferr == nil {
+			if serErr := tracker.Serialize(f); serErr == nil {
+				f.Close()
+				total := len(tracker.Tasks())
+				fmt.Fprintf(os.Stderr, "\nCompleted %d tasks. Logs written to: %s. Investigate logs with:\n%s build --view-logs %s\n", total, f.Name(), os.Args[0], f.Name())
+			} else {
+				f.Close()
+			}
 		}
 	}
 

@@ -13,6 +13,8 @@ A hand-rolled subcommand dispatch over `os.Args[1]`, each command owning a
   `--view-logs` replays a saved run, and `--target <Key>` builds only that one
   node — with `--no-recurse` every other node must resolve from the cache (a
   miss is a hard error), so the pair builds exactly one node from cached inputs.
+  `--stream` (with `--target` + `--no-recurse`) forwards the target's logs live
+  to the console instead of the UI, for a legible build log on a CI runner.
 - `graph` — render the dependency graph as Mermaid (default), a deterministic
   machine-readable node/edge export with `--format=json`, or a Gantt chart from
   a saved build-logs file.
