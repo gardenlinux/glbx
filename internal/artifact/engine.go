@@ -23,6 +23,14 @@ type Engine struct {
 	store   *objstore.Store
 	workers int
 	results []BuildResult
+
+	// target, when non-empty, names the one node Key the engine is allowed to
+	// build. noRecurse requires every other node to resolve from cache: a miss
+	// on a non-target node is a hard error rather than a build. Together they
+	// make the engine build exactly one node, pulling all its inputs from the
+	// (pull-through) cache.
+	target    string
+	noRecurse bool
 }
 
 func NewEngine(g *Graph, store *objstore.Store, workers int) *Engine {
@@ -34,6 +42,15 @@ func NewEngine(g *Graph, store *objstore.Store, workers int) *Engine {
 		store:   store,
 		workers: workers,
 	}
+}
+
+// SetScope restricts the engine to building a single node. target is the Key of
+// the node to build; when noRecurse is true, every other node must already
+// resolve from the cache and a miss is a hard error. A node whose required
+// cache input is missing fails, and its dependents are skipped.
+func (e *Engine) SetScope(target string, noRecurse bool) {
+	e.target = target
+	e.noRecurse = noRecurse
 }
 
 // runHooks observes engine state transitions during run().
@@ -297,6 +314,14 @@ func (e *Engine) buildNode(ctx context.Context, n *node) BuildResult {
 		n.outputs = outputs
 		e.graph.mu.Unlock()
 		return BuildResult{Artifact: n.artifact, Cached: true}
+	}
+
+	// In no-recurse mode only the target node may be built; every other node
+	// must have resolved from the cache above. A miss here means a dependency
+	// the graph says must already exist was not published — a build-ordering
+	// error, surfaced loudly rather than silently rebuilt.
+	if e.noRecurse && n.artifact.Key() != e.target {
+		return fail(fmt.Errorf("required cache input missing (no-recurse): %s (id=%s)", n.artifact, identity.Short()))
 	}
 
 	l.Info("building: %s (id=%s)", n.artifact, identity.Short())

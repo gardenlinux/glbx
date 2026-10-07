@@ -270,6 +270,108 @@ func TestEngineCacheHit(t *testing.T) {
 	}
 }
 
+// primeCache stores an empty manifest for an identity so a node resolves as a
+// cache hit without building.
+func primeCache(t *testing.T, store *objstore.Store, identity string) {
+	t.Helper()
+	hash, _ := objstore.NewHash(identity)
+	manifestHash, err := store.Blobs.Store(strings.NewReader(""))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Map.Set(hash, manifestHash, false); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestEngineNoRecurse builds a single target node whose dependency is already
+// in the cache: only the target builds, the dependency is a cache hit.
+func TestEngineNoRecurse(t *testing.T) {
+	dir := t.TempDir()
+	store, err := objstore.NewLocal(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	bID := strings.Repeat("b", 64)
+	primeCache(t, store, bID)
+
+	var builtB bool
+	b := &mockArtifact{name: "B", identity: bID, buildFn: func(ctx BuildContext) ([]Output, error) {
+		builtB = true
+		return nil, nil
+	}}
+	var builtA bool
+	a := &mockArtifact{name: "A", deps: []Artifact{b}, identity: strings.Repeat("a", 64), buildFn: func(ctx BuildContext) ([]Output, error) {
+		builtA = true
+		return nil, nil
+	}}
+
+	g := NewGraph()
+	g.Add(a)
+	g.Add(b)
+
+	engine := NewEngine(g, store, 1)
+	engine.SetScope("A", true)
+	results, err := engine.Run(testCtx())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, r := range results {
+		if r.Err != nil {
+			t.Fatalf("build error for %s: %v", r.Artifact, r.Err)
+		}
+	}
+	if !builtA {
+		t.Fatal("target A should have been built")
+	}
+	if builtB {
+		t.Fatal("dependency B should have been a cache hit, not built")
+	}
+}
+
+// TestEngineNoRecurseMissingDep fails the target when a non-target dependency
+// is not in the cache: a build-ordering error, surfaced rather than built.
+func TestEngineNoRecurseMissingDep(t *testing.T) {
+	dir := t.TempDir()
+	store, err := objstore.NewLocal(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	b := &mockArtifact{name: "B", identity: strings.Repeat("b", 64), buildFn: func(ctx BuildContext) ([]Output, error) {
+		t.Fatal("non-target dependency B must not build in no-recurse mode")
+		return nil, nil
+	}}
+	a := &mockArtifact{name: "A", deps: []Artifact{b}, identity: strings.Repeat("a", 64), buildFn: func(ctx BuildContext) ([]Output, error) {
+		t.Fatal("target A must not build when its dependency is missing")
+		return nil, nil
+	}}
+
+	g := NewGraph()
+	g.Add(a)
+	g.Add(b)
+
+	engine := NewEngine(g, store, 1)
+	engine.SetScope("A", true)
+	results, err := engine.Run(testCtx())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	byKey := make(map[string]BuildResult, len(results))
+	for _, r := range results {
+		byKey[r.Artifact.Key()] = r
+	}
+	if byKey["B"].Err == nil {
+		t.Fatal("expected B to fail (required cache input missing)")
+	}
+	if byKey["A"].Err == nil {
+		t.Fatal("expected A to be skipped after B failed")
+	}
+}
+
 func TestEngineParallel(t *testing.T) {
 	dir := t.TempDir()
 	store, err := objstore.NewLocal(dir)

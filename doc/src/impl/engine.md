@@ -18,5 +18,12 @@ propagation to dependents. A thin observation seam wires the progress UI to the
 engine (one task per artifact) with no UI type visible to the engine's core and
 no engine type visible to the UI.
 
+Scoping the engine to a single node restricts the build to one target Key and,
+in require-cache mode, forbids building anything else: every non-target node
+must resolve from the (pull-through) cache, and a miss becomes a hard error
+whose dependents are skipped. This builds exactly the target, pulling all of its
+inputs from the cache and failing loudly if an input the graph says must exist
+has not been published.
+
 A mock artifact drives the whole traversal, cache, and scheduler in tests,
 proving the engine is indifferent to what an artifact builds.

@@ -30,6 +30,8 @@ func cmdBuild(args []string) error {
 	confDir := fs.String("conf-dir", "", "configuration directory (contains pkgs/, rootfs.yml)")
 	stubPath := fs.String("stub", "", "path to exec_env_stub binary")
 	invalidate := fs.String("invalidate", "", "delete the map entry for the target with this Key (e.g. rootfs:amd64) and exit")
+	target := fs.String("target", "", "build only the node with this Key (e.g. rootfs:amd64); other nodes must resolve from cache")
+	noRecurse := fs.Bool("no-recurse", false, "require every non-target node to resolve from cache; a miss is a hard error")
 	logsOutput := fs.String("logs-output", "", "path to write the build-logs JSON snapshot (default: $TMPDIR/glbx-build-*.json)")
 	fs.Parse(args)
 
@@ -85,7 +87,18 @@ func cmdBuild(args []string) error {
 
 	l.Info("graph: %d nodes", graphResult.Graph.Len())
 
+	if *target != "" {
+		if graphResult.Graph.Find(*target) == nil {
+			return fmt.Errorf("no artifact with Key %q in graph", *target)
+		}
+	} else if *noRecurse {
+		return fmt.Errorf("--no-recurse requires --target")
+	}
+
 	engine := artifact.NewEngine(graphResult.Graph, store, *jobs)
+	if *target != "" {
+		engine.SetScope(*target, *noRecurse)
+	}
 	results, err := engine.RunWithUI(ctx, *logsOutput)
 	if err != nil {
 		return fmt.Errorf("run engine: %w", err)

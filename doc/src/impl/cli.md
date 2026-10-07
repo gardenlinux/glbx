@@ -9,8 +9,10 @@ A hand-rolled subcommand dispatch over `os.Args[1]`, each command owning a
 - `lockfile` / `lockfile-rootfs` — generate a package's build-tooling lock, or
   the image configuration-tooling lock.
 - `build` — drive the engine over the discovered artifact graph, with the
-  interactive progress UI; `--invalidate` drops a target's cache entry and
-  `--view-logs` replays a saved run.
+  interactive progress UI; `--invalidate` drops a target's cache entry,
+  `--view-logs` replays a saved run, and `--target <Key>` builds only that one
+  node — with `--no-recurse` every other node must resolve from the cache (a
+  miss is a hard error), so the pair builds exactly one node from cached inputs.
 - `graph` — render the dependency graph as Mermaid, or a Gantt chart from a
   saved build-logs file.
 - `cache` — object-store administration: `status`, keep-set `gc`, and raw
