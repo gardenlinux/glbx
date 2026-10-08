@@ -5,7 +5,19 @@
 A hand-rolled subcommand dispatch over `os.Args[1]`, each command owning a
 `flag.FlagSet`:
 
-- `import` — import a source package into the working tree.
+- `import <package>` — import a Debian source package into the working tree. By
+  default the import is recorded on the package's independent upstream lineage: a
+  first import is an orphan commit, each later import is parented on the previous
+  import, and the commit — carrying a fenced metadata block (`pkg`, `version`,
+  `auto_update`) in its message — is built entirely through git plumbing against
+  a throwaway index, so the working tree is never disturbed by the construction.
+  The command then replaces itself with `git merge` to bring the import into the
+  current branch, so a merge conflict (or clean merge) propagates verbatim as the
+  command's own output and exit status. When a prior import already pins the exact
+  version resolved from the archive, the import short-circuits before any download
+  (`already present, nothing to do`). `--no-git-history` writes `pkgs/<package>/`
+  directly with no commit; a non-git working tree falls back to that mode with a
+  warning.
 - `lockfile` / `lockfile-rootfs` — generate a package's build-tooling lock, or
   the image configuration-tooling lock.
 - `build` — drive the engine over the discovered artifact graph, with the

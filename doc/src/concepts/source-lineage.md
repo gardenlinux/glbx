@@ -36,10 +36,13 @@ root — it begins a fresh history of its own. A package's upstream history stan
 alone and joins an integration branch only through merges.
 
 A lineage's identity lives in its commits. Each pristine commit records in its
-message a machine-readable **import marker** carrying two facts:
+message a machine-readable **import marker** — a fenced block delimited by exact
+begin/end marker lines, carrying:
 
 - the *package* it belongs to,
-- the *exact upstream version* it records.
+- the *exact upstream version* it records,
+- the *auto-update source* the version came from (e.g. `debian:testing`), which
+  marks whether and from where the package may later be refreshed automatically.
 
 Keeping identity in the commits buys two things. First, it removes a class of
 mistakes: the history itself is the record, baked into each commit's marker, so
@@ -50,13 +53,15 @@ new package arrives as one pull request that introduces its first import and
 merges it, with no setup to do before the work can land.
 
 To find a package's current upstream baseline on a given branch, glbx walks the
-full commit graph reachable from that branch — following every parent of a merge
-commit, since the pristine imports are reached *through* the integration
-merges — collects the commits whose marker names the package, and selects the
-one that is not an ancestor of any other match. That unique newest-by-ancestry
-import is the baseline: ancestry alone decides which import is newest. If the
-matching commits do not line up on a single chain, the lineage has forked, which
-glbx reports as an error.
+history reachable from that branch that touches the package's directory —
+following every parent of a merge commit, since the pristine imports are reached
+*through* the integration merges — and takes the most recent commit whose message
+carries the exact import marker. Because the imports form a single parent chain,
+newest-by-history is the baseline. The chosen commit is sanity-checked before it
+is trusted: its message must carry both exact markers and its tree must contain
+nothing outside the package's own directory. A commit that matches the marker but
+fails this check is corrupt lineage, which glbx reports as an error rather than
+silently falling back to an older import.
 
 Tags on accepted imports are a readable index over this history: a tag points at
 a commit the graph already fully describes, so the authority is the commit graph

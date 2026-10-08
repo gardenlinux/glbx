@@ -1,8 +1,16 @@
 // Package importer imports a Debian source package into the working tree. It
 // resolves the highest version from the signed Sources index, downloads and
-// hash-verifies each source file into the object store, extracts the packaging
-// into the tree, and writes the sources.yml that pins each upstream archive by
-// hash and retrieval location.
+// hash-verifies each source file into the object store, extracts the packaging,
+// and writes the sources.yml that pins each upstream archive by hash and
+// retrieval location.
+//
+// By default the import is recorded as a commit on the package's independent
+// upstream lineage: a first import is an orphan commit, each later import is
+// parented on the previous import, and the commit is built entirely through git
+// plumbing against a throwaway index so the working tree is never disturbed. The
+// caller merges that commit into the current branch. In --no-git-history mode
+// (or outside a git repository) the packaging is written directly into
+// pkgs/<name>/ with no commit.
 package importer
 
 import (
@@ -42,6 +50,12 @@ type ImportConfig struct {
 	NoVerify   bool
 	Cookie     string
 	HTTPClient *http.Client
+
+	// GitHistory records the import as a commit on the package's upstream
+	// lineage when OutputDir is a git repository. When false (or when OutputDir
+	// is not a git repository) the packaging is written directly into
+	// pkgs/<name>/ instead.
+	GitHistory bool
 }
 
 // ImportResult contains the results of a successful source package import.
@@ -50,6 +64,16 @@ type ImportResult struct {
 	Version string
 	Format  string
 	Sources []SourceEntry // orig tarballs stored
+
+	// Committed is true when the import was recorded as a git commit. CommitHash
+	// is that commit, FirstImport reports whether it is the orphan root of the
+	// package lineage (which the caller merges with --allow-unrelated-histories),
+	// and AlreadyPresent is true when a prior import already pinned this exact
+	// version, so nothing was imported.
+	Committed      bool
+	CommitHash     string
+	FirstImport    bool
+	AlreadyPresent bool
 }
 
 // SourceEntry is one upstream archive stored during import: its filename, its
@@ -79,7 +103,9 @@ func (cfg *ImportConfig) defaults() {
 // Import fetches and imports a Debian source package from an APT repository.
 // It downloads the InRelease file, verifies its GPG signature, finds the
 // requested package in the Sources index, downloads all source files, and
-// extracts the debian/ directory into the output directory.
+// extracts the packaging. In git-history mode it records the import as a commit
+// on the package's upstream lineage (leaving the merge to the caller); a prior
+// import of the exact same version short-circuits before any download.
 func Import(cfg ImportConfig, packageName string) (*ImportResult, error) {
 	cfg.defaults()
 
@@ -91,6 +117,16 @@ func Import(cfg ImportConfig, packageName string) (*ImportResult, error) {
 	}
 	if packageName == "" {
 		return nil, fmt.Errorf("importer: package name is required")
+	}
+
+	l := log.From(cfg.Ctx, log.Importer)
+
+	// Resolve whether the import is recorded on the git lineage. A requested
+	// git import against a non-repository falls back to a direct write with one
+	// warning; direct mode is silent.
+	gitMode := cfg.GitHistory && isGitRepo(cfg.OutputDir)
+	if cfg.GitHistory && !gitMode {
+		l.Warn("%s is not a git repository; writing pkgs/%s directly without import history", cfg.OutputDir, packageName)
 	}
 
 	releasePayload, err := aptrepo.FetchInRelease(cfg.Ctx, aptrepo.FetchConfig{
@@ -117,17 +153,34 @@ func Import(cfg ImportConfig, packageName string) (*ImportResult, error) {
 		return nil, err
 	}
 
+	// In git mode, locate the previous import before downloading: an unchanged
+	// version is a no-op, and its commit becomes the parent of the new import.
+	var parent *importCommit
+	if gitMode {
+		parent, err = findPreviousImport(cfg.OutputDir, srcPkg.Name)
+		if err != nil {
+			return nil, fmt.Errorf("importer: %w", err)
+		}
+		if parent != nil && parent.Version == srcPkg.Version {
+			l.Info("%s %s already present, nothing to do", srcPkg.Name, srcPkg.Version)
+			return &ImportResult{
+				Name:           srcPkg.Name,
+				Version:        srcPkg.Version,
+				Format:         srcPkg.Format,
+				AlreadyPresent: true,
+			}, nil
+		}
+	}
+
 	sourceFiles, sourceSHA1, err := downloadSourceFiles(cfg, srcPkg)
 	if err != nil {
 		return nil, fmt.Errorf("importer: downloading source files: %w", err)
 	}
 
-	result, err := extractDebianDir(cfg, srcPkg, sourceFiles, sourceSHA1)
-	if err != nil {
-		return nil, err
+	if !gitMode {
+		return extractToTree(cfg, srcPkg, sourceFiles, sourceSHA1)
 	}
-
-	return result, nil
+	return extractAndCommit(cfg, srcPkg, sourceFiles, sourceSHA1, parent)
 }
 
 // fetchSourcePackageStanza downloads main/source/Sources.gz (using the SHA256
@@ -191,29 +244,76 @@ func fetchSourcePackageStanza(cfg ImportConfig, releaseHashes map[string]string,
 	return srcPkg, nil
 }
 
-// extractDebianDir creates pkgs/<name>/, extracts the debian/ tree according
-// to the package's source format, writes sources.yml, and assembles the
-// ImportResult.
-func extractDebianDir(cfg ImportConfig, srcPkg *sourcePackage, sourceFiles map[string]objstore.Hash, sourceSHA1 map[string]string) (*ImportResult, error) {
-	pkgDir := filepath.Join(cfg.OutputDir, "pkgs", srcPkg.Name)
-	if err := os.MkdirAll(pkgDir, 0o755); err != nil {
+// extractInto populates destDir with the package's extracted packaging and
+// sources.yml. destDir is the self-contained pkgs/<name> content: the extractors
+// and writeSourcesYML write only beneath it.
+func extractInto(cfg ImportConfig, srcPkg *sourcePackage, sourceFiles map[string]objstore.Hash, sourceSHA1 map[string]string, destDir string) ([]SourceEntry, error) {
+	if err := os.MkdirAll(destDir, 0o755); err != nil {
 		return nil, fmt.Errorf("importer: creating package directory: %w", err)
 	}
 
-	if err := extractDebian(cfg, srcPkg, sourceFiles, pkgDir); err != nil {
+	if err := extractDebian(cfg, srcPkg, sourceFiles, destDir); err != nil {
 		return nil, fmt.Errorf("importer: extracting debian directory: %w", err)
 	}
 
 	origEntries := filterOrigEntries(cfg, srcPkg, sourceFiles, sourceSHA1)
-	if err := writeSourcesYML(pkgDir, origEntries); err != nil {
+	if err := writeSourcesYML(destDir, origEntries); err != nil {
 		return nil, fmt.Errorf("importer: writing sources.yml: %w", err)
 	}
+	return origEntries, nil
+}
 
+// extractToTree extracts the package directly into pkgs/<name>/ under the
+// working tree (direct, non-git mode).
+func extractToTree(cfg ImportConfig, srcPkg *sourcePackage, sourceFiles map[string]objstore.Hash, sourceSHA1 map[string]string) (*ImportResult, error) {
+	pkgDir := filepath.Join(cfg.OutputDir, "pkgs", srcPkg.Name)
+	origEntries, err := extractInto(cfg, srcPkg, sourceFiles, sourceSHA1, pkgDir)
+	if err != nil {
+		return nil, err
+	}
 	return &ImportResult{
 		Name:    srcPkg.Name,
 		Version: srcPkg.Version,
 		Format:  srcPkg.Format,
 		Sources: origEntries,
+	}, nil
+}
+
+// extractAndCommit extracts the package into a throwaway directory and records
+// it as an import commit on the package lineage. parent is the previous import
+// (nil for a first, orphan import). The commit is built through plumbing; the
+// working tree is left untouched for the caller to merge.
+func extractAndCommit(cfg ImportConfig, srcPkg *sourcePackage, sourceFiles map[string]objstore.Hash, sourceSHA1 map[string]string, parent *importCommit) (*ImportResult, error) {
+	contentDir, err := os.MkdirTemp("", "glbx-import-tree-*")
+	if err != nil {
+		return nil, fmt.Errorf("importer: creating temp content dir: %w", err)
+	}
+	defer os.RemoveAll(contentDir)
+
+	origEntries, err := extractInto(cfg, srcPkg, sourceFiles, sourceSHA1, contentDir)
+	if err != nil {
+		return nil, err
+	}
+
+	autoUpdate := "debian:" + cfg.Dist
+	msg := formatImportMessage(srcPkg.Name, srcPkg.Version, autoUpdate)
+	parentHash := ""
+	if parent != nil {
+		parentHash = parent.Hash
+	}
+	commit, err := commitImportTree(cfg.OutputDir, contentDir, srcPkg.Name, msg, parentHash)
+	if err != nil {
+		return nil, fmt.Errorf("importer: building import commit: %w", err)
+	}
+
+	return &ImportResult{
+		Name:        srcPkg.Name,
+		Version:     srcPkg.Version,
+		Format:      srcPkg.Format,
+		Sources:     origEntries,
+		Committed:   true,
+		CommitHash:  commit,
+		FirstImport: parent == nil,
 	}, nil
 }
 

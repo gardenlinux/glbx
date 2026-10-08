@@ -343,3 +343,55 @@ func TestImportMultiOrig(t *testing.T) {
 
 	assertControlExists(t, outputDir, "perl")
 }
+
+// TestImportGitMode drives the git-history path against the real archive: the
+// first import of a package becomes an orphan commit merged into HEAD, and a
+// second import of the same version short-circuits with no new commit.
+func TestImportGitMode(t *testing.T) {
+	requireRealnet(t)
+
+	root := gitInit(t)
+	cfg := ImportConfig{
+		Ctx:        context.Background(),
+		Store:      sharedRealnet.store,
+		OutputDir:  root,
+		NoVerify:   true,
+		GitHistory: true,
+	}
+
+	res, err := Import(cfg, "hello")
+	if err != nil {
+		t.Fatalf("first import: %v", err)
+	}
+	if !res.Committed || !res.FirstImport || res.CommitHash == "" {
+		t.Fatalf("expected a first (orphan) import commit, got %+v", res)
+	}
+	// The caller merges; emulate that here (first import is unrelated history).
+	runGit(t, root, "merge", "--no-edit", "--allow-unrelated-histories", res.CommitHash)
+
+	if _, err := os.Stat(filepath.Join(root, "pkgs", "hello", "sources.yml")); err != nil {
+		t.Errorf("pkgs/hello/sources.yml missing after merge: %v", err)
+	}
+
+	// findPreviousImport must now locate the merged import.
+	prev, err := findPreviousImport(root, "hello")
+	if err != nil {
+		t.Fatalf("findPreviousImport: %v", err)
+	}
+	if prev == nil || prev.Version != res.Version {
+		t.Fatalf("findPreviousImport = %+v, want version %q", prev, res.Version)
+	}
+
+	// Re-importing the same version is a no-op: already-present, no commit.
+	headBefore := strings.TrimSpace(runGit(t, root, "rev-parse", "HEAD"))
+	res2, err := Import(cfg, "hello")
+	if err != nil {
+		t.Fatalf("second import: %v", err)
+	}
+	if !res2.AlreadyPresent || res2.Committed {
+		t.Errorf("expected already-present no-op, got %+v", res2)
+	}
+	if headAfter := strings.TrimSpace(runGit(t, root, "rev-parse", "HEAD")); headAfter != headBefore {
+		t.Errorf("HEAD moved on a no-op re-import: %s -> %s", headBefore, headAfter)
+	}
+}
