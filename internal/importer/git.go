@@ -133,17 +133,24 @@ type PkgMetadata struct {
 	AutoUpdate string `yaml:"auto_update" json:"auto_update"`
 }
 
-// CollectPkgMetadata returns the most-recent import commit for each package
-// reachable from HEAD. It asks git for the import commits — those carrying the
-// metadata begin marker — in topological order (every commit before any of its
-// ancestors) and takes the first one seen for each package, so that commit is the
-// package's newest import and anything behind it is an older version of the same
-// lineage. Entries are returned in the order first discovered. An unborn branch
-// yields no entries.
+// CollectPkgMetadata returns the most-recent import commit for each package that
+// currently has a directory under pkgs/ in the working tree. It asks git for the
+// import commits — those carrying the metadata begin marker — in topological
+// order (every commit before any of its ancestors) and takes the first one seen
+// for each package, so that commit is the package's newest import and anything
+// behind it is an older version of the same lineage. A package whose pkgs/
+// directory is absent is filtered out even when its lineage is still reachable,
+// so a removed package drops out as soon as its directory is gone. Entries are
+// returned in the order first discovered. An unborn branch yields no entries.
 func CollectPkgMetadata(root string) ([]PkgMetadata, error) {
 	if exec.Command("git", "-C", root, "rev-parse", "--verify", "-q", "HEAD").Run() != nil {
 		// No commit yet: nothing to collect.
 		return nil, nil
+	}
+
+	present, err := presentPackages(root)
+	if err != nil {
+		return nil, err
 	}
 
 	// Select only import commits — those whose message carries the begin marker —
@@ -178,17 +185,39 @@ func CollectPkgMetadata(root string) ([]PkgMetadata, error) {
 			// as a full marker line; not an import commit.
 			continue
 		}
-		if pkg := fields["pkg"]; !seen[pkg] {
-			seen[pkg] = true
-			result = append(result, PkgMetadata{
-				Commit:     hash,
-				Pkg:        pkg,
-				Version:    fields["version"],
-				AutoUpdate: fields["auto_update"],
-			})
+		pkg := fields["pkg"]
+		if !present[pkg] || seen[pkg] {
+			continue
 		}
+		seen[pkg] = true
+		result = append(result, PkgMetadata{
+			Commit:     hash,
+			Pkg:        pkg,
+			Version:    fields["version"],
+			AutoUpdate: fields["auto_update"],
+		})
 	}
 	return result, nil
+}
+
+// presentPackages is the set of package names that currently have a directory
+// under pkgs/ in the working tree, including uncommitted additions and removals.
+// A missing pkgs/ directory is an empty set, not an error.
+func presentPackages(root string) (map[string]bool, error) {
+	entries, err := os.ReadDir(path.Join(root, "pkgs"))
+	if err != nil {
+		if os.IsNotExist(err) {
+			return map[string]bool{}, nil
+		}
+		return nil, fmt.Errorf("reading pkgs directory: %w", err)
+	}
+	present := make(map[string]bool, len(entries))
+	for _, e := range entries {
+		if e.IsDir() {
+			present[e.Name()] = true
+		}
+	}
+	return present, nil
 }
 
 // validateImportCommit sanity-checks that commit is a well-formed import for

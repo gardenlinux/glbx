@@ -297,6 +297,41 @@ func TestCollectPkgMetadataUnborn(t *testing.T) {
 	}
 }
 
+func TestCollectPkgMetadataFiltersByPresentDir(t *testing.T) {
+	root := gitInit(t)
+
+	importAndMerge(t, root, "foo", "1.0", "")
+	importAndMerge(t, root, "bar", "1.0", "")
+
+	// Remove bar's directory in the working tree (not even committed). Its import
+	// lineage is still reachable, but with no pkgs/bar it must drop out.
+	if err := os.RemoveAll(filepath.Join(root, "pkgs", "bar")); err != nil {
+		t.Fatal(err)
+	}
+
+	entries, err := CollectPkgMetadata(root)
+	if err != nil {
+		t.Fatalf("CollectPkgMetadata: %v", err)
+	}
+	if len(entries) != 1 || entries[0].Pkg != "foo" {
+		t.Fatalf("expected only foo after removing pkgs/bar, got %+v", entries)
+	}
+
+	// A package directory with no import lineage yields nothing, not an error.
+	if err := os.MkdirAll(filepath.Join(root, "pkgs", "baz"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	entries, err = CollectPkgMetadata(root)
+	if err != nil {
+		t.Fatalf("CollectPkgMetadata with uncommitted dir: %v", err)
+	}
+	for _, e := range entries {
+		if e.Pkg == "baz" {
+			t.Errorf("baz has no import commit and must not appear: %+v", entries)
+		}
+	}
+}
+
 func TestCollectPkgMetadataRejectsCorruptLineage(t *testing.T) {
 	root := gitInit(t)
 
