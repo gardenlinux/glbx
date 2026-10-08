@@ -6,6 +6,13 @@ set -euo pipefail
 # and image-configuration locks. After it completes, the directory is ready for
 # `glbx build`.
 #
+# When the directory is a git repository, the integration artifacts this script
+# produces on top of the pristine imports — applied patches, per-package build
+# config and locks, and the rootfs configuration — are each committed, so a
+# prepared tree leaves nothing uncommitted. (glbx import records the pristine
+# imports itself; the lockfile commands never touch git.) Outside a git
+# repository these commit steps are skipped.
+#
 # Usage:
 #   ./prepare_staging.sh <conf-dir>   # prepare a specific directory
 #   ./prepare_staging.sh              # defaults to ../staging
@@ -25,6 +32,23 @@ mkdir -p "$CONF_DIR"
 CONF_DIR="$(cd "$CONF_DIR" && pwd)"
 PKGS_DIR="$CONF_DIR/pkgs"
 mkdir -p "$PKGS_DIR"
+
+# Whether the staging directory is a git repository; when it is, integration
+# artifacts are committed as they are produced.
+IS_GIT=0
+if git -C "$CONF_DIR" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+	IS_GIT=1
+fi
+
+# git_commit <message> <pathspec...> stages the given paths and commits them,
+# but only in a git repository and only when they produced a change.
+git_commit() {
+	[ "$IS_GIT" = 1 ] || return 0
+	local msg="$1"; shift
+	git -C "$CONF_DIR" add -- "$@"
+	git -C "$CONF_DIR" diff --cached --quiet && return 0
+	git -C "$CONF_DIR" commit -q -m "$msg"
+}
 
 GLBX="${GLBX_BIN:-$PROJECT_DIR/bin/glbx}"
 STUB="${GLBX_EXEC_ENV_STUB:-$PROJECT_DIR/bin/exec_env_stub}"
@@ -73,7 +97,15 @@ for pkg in "${PACKAGES[@]}"; do
 	[ -d "$patches_dir" ] || continue
 	src_dir="$PKGS_DIR/$pkg/src"
 	stamp="$PKGS_DIR/$pkg/.patches-applied"
-	[ -f "$stamp" ] && { echo "$pkg: patches already applied"; continue; }
+	# In a git repo the "patched <pkg>" commit is the record of applied patches;
+	# outside git a stamp file guards against re-applying on a re-run.
+	if [ "$IS_GIT" = 1 ]; then
+		if git -C "$CONF_DIR" log --format=%s -- "pkgs/$pkg" 2>/dev/null | grep -qxF "patched $pkg"; then
+			echo "$pkg: patches already applied"; continue
+		fi
+	elif [ -f "$stamp" ]; then
+		echo "$pkg: patches already applied"; continue
+	fi
 	shopt -s nullglob
 	patches=("$patches_dir"/*.patch)
 	shopt -u nullglob
@@ -83,34 +115,35 @@ for pkg in "${PACKAGES[@]}"; do
 		echo "$pkg: applying $(basename "$p")"
 		patch -p1 -d "$src_dir" --no-backup-if-mismatch < "$p" || { echo "FAIL: patch $p"; exit 1; }
 	done
-	touch "$stamp"
-done
-
-echo "=== Copy build.yml templates ==="
-for pkg in "${PACKAGES[@]}"; do
-	if [ -f "$TEMPLATES_DIR/$pkg/build.yml" ]; then
-		cp "$TEMPLATES_DIR/$pkg/build.yml" "$PKGS_DIR/$pkg/build.yml"
+	if [ "$IS_GIT" = 1 ]; then
+		git_commit "patched $pkg" "pkgs/$pkg"
+	else
+		touch "$stamp"
 	fi
 done
-[ -f "$TEMPLATES_DIR/rootfs.yml" ] && cp "$TEMPLATES_DIR/rootfs.yml" "$CONF_DIR/rootfs.yml"
 
-echo "=== Generate lockfiles ==="
+echo "=== Build config and lockfiles ==="
 for pkg in "${PACKAGES[@]}"; do
 	if [ -f "$PKGS_DIR/$pkg/build-deps.yml" ]; then
 		echo "$pkg: lockfile exists"
 		continue
 	fi
+	[ -f "$TEMPLATES_DIR/$pkg/build.yml" ] && cp "$TEMPLATES_DIR/$pkg/build.yml" "$PKGS_DIR/$pkg/build.yml"
 	echo "Generating lockfile for $pkg..."
 	"$GLBX" lockfile "${CACHE_ARGS[@]}" --cookie "$COOKIE" --output "$CONF_DIR" "$pkg" \
 		|| { echo "FAIL: lockfile $pkg"; exit 1; }
+	# build.yml and its resolved lock are one logical change — one commit.
+	git_commit "configure $pkg build" "pkgs/$pkg"
 done
 
 if [ -f "$CONF_DIR/rootfs-deps.yml" ]; then
 	echo "rootfs lockfile exists"
 else
+	[ -f "$TEMPLATES_DIR/rootfs.yml" ] && cp "$TEMPLATES_DIR/rootfs.yml" "$CONF_DIR/rootfs.yml"
 	echo "Generating rootfs lockfile..."
 	"$GLBX" lockfile-rootfs "${CACHE_ARGS[@]}" --cookie "$COOKIE" --output "$CONF_DIR" \
 		|| { echo "FAIL: lockfile-rootfs"; exit 1; }
+	git_commit "configure rootfs image" rootfs.yml rootfs-deps.yml
 fi
 
 echo "=== Staging prepared: $CONF_DIR ==="

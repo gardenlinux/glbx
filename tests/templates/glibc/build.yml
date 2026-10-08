@@ -1,7 +1,5 @@
 build_profiles: [nocheck, noudeb, nobiarch]
 build_options: [nocheck]
-extra_build_env:
-- "DEB_CFLAGS_APPEND=-Wno-error"
 runtime_depends:
   libc6: [glibc:libc-gconv-modules-extra, gcc-16:libgcc-s1]
   libc-gconv-modules-extra: [gcc-16:libgcc-s1]
