@@ -22,6 +22,7 @@ func cmdGraph(args []string) error {
 	stubPath := fs.String("stub", "", "path to exec_env_stub binary")
 	outputFile := fs.String("output", "", "output file (default: stdout)")
 	format := fs.String("format", "mermaid", "output format: mermaid or json")
+	checkBuilt := fs.Bool("check-built", false, "with --format=json, add a per-node built map (true = the node's identity is present in $GLBX_REGISTRY)")
 	gantt := fs.String("gantt", "", "render mermaid gantt chart from a build logs file (skips graph build)")
 	fs.Parse(args)
 
@@ -31,6 +32,9 @@ func cmdGraph(args []string) error {
 
 	if *format != "mermaid" && *format != "json" {
 		return fmt.Errorf("unknown format %q (want mermaid or json)", *format)
+	}
+	if *checkBuilt && *format != "json" {
+		return fmt.Errorf("--check-built requires --format=json")
 	}
 
 	storeDir := *cacheDir
@@ -62,7 +66,14 @@ func cmdGraph(args []string) error {
 
 	var content string
 	if *format == "json" {
-		content, err = graphJSON(graphResult.Graph)
+		var builtStatus map[string]bool
+		if *checkBuilt {
+			builtStatus, err = checkBuiltStatus(graphResult.Graph)
+			if err != nil {
+				return err
+			}
+		}
+		content, err = graphJSON(graphResult.Graph, builtStatus)
 		if err != nil {
 			return err
 		}
@@ -90,10 +101,12 @@ func cmdGraph(args []string) error {
 // graphExport is the canonical serialized form of the dependency graph: node
 // Keys in stable topological order and built-from edges sorted deterministically.
 // It records structure only (no identities), so it changes when the graph's
-// shape changes, not on every source edit.
+// shape changes, not on every source edit. BuiltStatus is populated only by
+// --check-built and is omitted otherwise, keeping the plain export stable.
 type graphExport struct {
-	Nodes []string          `json:"nodes"`
-	Edges []graphExportEdge `json:"edges"`
+	Nodes       []string          `json:"nodes"`
+	Edges       []graphExportEdge `json:"edges"`
+	BuiltStatus map[string]bool   `json:"builtStatus,omitempty"`
 }
 
 type graphExportEdge struct {
@@ -102,15 +115,16 @@ type graphExportEdge struct {
 }
 
 // graphJSON renders the graph as deterministic, machine-readable JSON with a
-// trailing newline.
-func graphJSON(g *artifact.Graph) (string, error) {
+// trailing newline. builtStatus, when non-nil, is attached as the per-node
+// built map.
+func graphJSON(g *artifact.Graph, builtStatus map[string]bool) (string, error) {
 	order := g.StableTopologicalOrder()
 	nodes := make([]string, len(order))
 	for i, a := range order {
 		nodes[i] = a.Key()
 	}
 	edges := g.Edges()
-	exp := graphExport{Nodes: nodes, Edges: make([]graphExportEdge, len(edges))}
+	exp := graphExport{Nodes: nodes, Edges: make([]graphExportEdge, len(edges)), BuiltStatus: builtStatus}
 	for i, e := range edges {
 		exp.Edges[i] = graphExportEdge{From: e.From, To: e.To}
 	}
@@ -119,6 +133,38 @@ func graphJSON(g *artifact.Graph) (string, error) {
 		return "", fmt.Errorf("marshal graph: %w", err)
 	}
 	return string(b) + "\n", nil
+}
+
+// checkBuiltStatus reports, per node Key, whether that node's identity is
+// already present in the configured registry (a map/<identity> tag exists). It
+// probes the registry directly — not a pull-through — so it is a pure set of
+// existence checks that fetches nothing. With no registry configured every node
+// is reported not-built.
+func checkBuiltStatus(g *artifact.Graph) (map[string]bool, error) {
+	status := make(map[string]bool, g.Len())
+
+	ref, insecure := registryFromEnv()
+	if ref == "" {
+		for _, key := range g.Keys() {
+			status[key] = false
+		}
+		return status, nil
+	}
+
+	registry, err := objstore.NewRegistry(ref, insecure)
+	if err != nil {
+		return nil, fmt.Errorf("open registry: %w", err)
+	}
+
+	for _, key := range g.Keys() {
+		a := g.Find(key)
+		identity, err := a.Identity()
+		if err != nil {
+			return nil, fmt.Errorf("identity for %s: %w", key, err)
+		}
+		status[key] = registry.Map.Has(identity)
+	}
+	return status, nil
 }
 
 func cmdGraphGantt(logsPath, outputFile string) error {

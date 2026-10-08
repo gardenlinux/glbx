@@ -18,7 +18,8 @@ A hand-rolled subcommand dispatch over `os.Args[1]`, each command owning a
   to the console instead of the UI, for a legible build log on a CI runner.
 - `graph` — render the dependency graph as Mermaid (default), a deterministic
   machine-readable node/edge export with `--format=json`, or a Gantt chart from
-  a saved build-logs file.
+  a saved build-logs file. `--check-built` adds to the JSON a per-node map of
+  which nodes are already present in `$GLBX_REGISTRY`, so a driver can skip them.
 - `cache` — object-store administration: `status`, keep-set `gc`, and raw
   `blobs` / `map` access.
 - `restore-cache` — populate the object store from the pins in the working tree,
