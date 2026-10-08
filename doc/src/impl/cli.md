@@ -18,6 +18,15 @@ A hand-rolled subcommand dispatch over `os.Args[1]`, each command owning a
   (`already present, nothing to do`). `--no-git-history` writes `pkgs/<package>/`
   directly with no commit; a non-git working tree falls back to that mode with a
   warning.
+- `get-pkg-metadata` — list the commits reachable from HEAD in topological order
+  and print the most recent import metadata for each package on its upstream
+  lineage. Topological order places every commit before its ancestors, so the
+  first import marker seen for a package is its newest import and anything behind
+  it is an older version of the same lineage. Each entry carries the import
+  `commit` hash plus the recorded `pkg`, `version`, and `auto_update`. `--format`
+  selects `yaml` (default) or `json` output. `--conf-dir` selects the
+  configuration directory (the working tree holding `pkgs/`), auto-discovered from
+  the working directory when omitted.
 - `lockfile` / `lockfile-rootfs` — generate a package's build-tooling lock, or
   the image configuration-tooling lock.
 - `build` — drive the engine over the discovered artifact graph, with the

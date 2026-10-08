@@ -67,6 +67,12 @@ Tags on accepted imports are a readable index over this history: a tag points at
 a commit the graph already fully describes, so the authority is the commit graph
 and its markers, with tags as convenience on top.
 
+The same markers make the whole set of baselines readable in one pass: listing the
+history reachable from a branch in topological order and taking the first import
+marker seen for each package recovers every package's current upstream version,
+with the commit it was imported at. This is how a refresh pass learns what each
+lineage currently holds before deciding what to update.
+
 ## What a pristine commit contains
 
 A pristine import commit records **only upstream source**: the content needed to

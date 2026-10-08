@@ -123,6 +123,74 @@ func findPreviousImport(root, pkg string) (*importCommit, error) {
 	return nil, nil
 }
 
+// PkgMetadata is one package's most-recent import, as recorded in the metadata
+// block of its import commit: the commit hash plus the recorded fields. The
+// struct tags fix the key order and names of the serialized form.
+type PkgMetadata struct {
+	Commit     string `yaml:"commit" json:"commit"`
+	Pkg        string `yaml:"pkg" json:"pkg"`
+	Version    string `yaml:"version" json:"version"`
+	AutoUpdate string `yaml:"auto_update" json:"auto_update"`
+}
+
+// CollectPkgMetadata returns the most-recent import commit for each package
+// reachable from HEAD. It asks git for the import commits — those carrying the
+// metadata begin marker — in topological order (every commit before any of its
+// ancestors) and takes the first one seen for each package, so that commit is the
+// package's newest import and anything behind it is an older version of the same
+// lineage. Entries are returned in the order first discovered. An unborn branch
+// yields no entries.
+func CollectPkgMetadata(root string) ([]PkgMetadata, error) {
+	if exec.Command("git", "-C", root, "rev-parse", "--verify", "-q", "HEAD").Run() != nil {
+		// No commit yet: nothing to collect.
+		return nil, nil
+	}
+
+	// Select only import commits — those whose message carries the begin marker —
+	// and emit one record per commit: the hash, a NUL, then the raw commit body.
+	// Records are separated by a record-separator byte so bodies containing blank
+	// lines parse unambiguously. Topological order (every commit before its
+	// ancestors) is preserved among the selected commits, so the first commit seen
+	// for a package is its newest import.
+	out, err := exec.Command("git", "-C", root, "rev-list", "--topo-order", "--no-commit-header",
+		"--grep="+importMetaBegin, "-F", "--format=%H%x00%B%x1e", "HEAD").Output()
+	if err != nil {
+		return nil, fmt.Errorf("listing history: %w", err)
+	}
+
+	seen := map[string]bool{}
+	var result []PkgMetadata
+	for _, record := range strings.Split(string(out), "\x1e") {
+		record = strings.Trim(record, "\n")
+		if record == "" {
+			continue
+		}
+		hash, msg, found := strings.Cut(record, "\x00")
+		if !found {
+			return nil, fmt.Errorf("malformed commit record %q", record)
+		}
+		fields, ok, err := parseImportMetadata(msg)
+		if err != nil {
+			return nil, fmt.Errorf("import commit %s: %w", hash, err)
+		}
+		if !ok {
+			// The begin marker matched as a substring of a longer line rather than
+			// as a full marker line; not an import commit.
+			continue
+		}
+		if pkg := fields["pkg"]; !seen[pkg] {
+			seen[pkg] = true
+			result = append(result, PkgMetadata{
+				Commit:     hash,
+				Pkg:        pkg,
+				Version:    fields["version"],
+				AutoUpdate: fields["auto_update"],
+			})
+		}
+	}
+	return result, nil
+}
+
 // validateImportCommit sanity-checks that commit is a well-formed import for
 // pkg: its message carries both exact markers, and its tree contains nothing
 // outside pkgs/<pkg>/. The structure inside pkgs/<pkg>/ is not checked.

@@ -227,3 +227,85 @@ func TestIsGitRepo(t *testing.T) {
 		t.Error("initialized repo should be recognized")
 	}
 }
+
+// importAndMerge builds an import commit for pkg/version and merges it into the
+// current branch, returning the import commit hash. parent is the previous import
+// commit hash, or empty for a first (orphan) import.
+func importAndMerge(t *testing.T, root, pkg, ver, parent string) string {
+	t.Helper()
+	content := writeContent(t, map[string]string{
+		"debian/control": "Source: " + pkg + "\n" + ver + "\n",
+	})
+	commit, err := commitImportTree(root, content, pkg, formatImportMessage(pkg, ver, "debian:testing"), parent)
+	if err != nil {
+		t.Fatalf("commitImportTree(%s %s): %v", pkg, ver, err)
+	}
+	args := []string{"merge", "--no-edit"}
+	if parent == "" {
+		args = append(args, "--allow-unrelated-histories")
+	}
+	runGit(t, root, append(args, commit)...)
+	return commit
+}
+
+func TestCollectPkgMetadata(t *testing.T) {
+	root := gitInit(t)
+
+	fooV1 := importAndMerge(t, root, "foo", "1.0", "")
+	importAndMerge(t, root, "bar", "1.0", "")
+	fooV2 := importAndMerge(t, root, "foo", "2.0", fooV1)
+
+	// A non-import maintainer commit on top must not affect the result.
+	if err := os.WriteFile(filepath.Join(root, "README"), []byte("edit\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, root, "commit", "-aqm", "maintainer tweak")
+
+	entries, err := CollectPkgMetadata(root)
+	if err != nil {
+		t.Fatalf("CollectPkgMetadata: %v", err)
+	}
+
+	got := map[string]PkgMetadata{}
+	for _, e := range entries {
+		got[e.Pkg] = e
+	}
+	if len(got) != 2 {
+		t.Fatalf("got %d packages, want 2: %+v", len(got), entries)
+	}
+	if got["foo"].Version != "2.0" {
+		t.Errorf("foo version = %q, want 2.0", got["foo"].Version)
+	}
+	if got["foo"].Commit != fooV2 {
+		t.Errorf("foo commit = %s, want newest import %s (not stale %s)", got["foo"].Commit, fooV2, fooV1)
+	}
+	if got["bar"].Version != "1.0" {
+		t.Errorf("bar version = %q, want 1.0", got["bar"].Version)
+	}
+}
+
+func TestCollectPkgMetadataUnborn(t *testing.T) {
+	root := t.TempDir()
+	runGit(t, root, "init", "-q")
+
+	entries, err := CollectPkgMetadata(root)
+	if err != nil {
+		t.Fatalf("CollectPkgMetadata on unborn branch: %v", err)
+	}
+	if len(entries) != 0 {
+		t.Errorf("expected no entries on unborn branch, got %+v", entries)
+	}
+}
+
+func TestCollectPkgMetadataRejectsCorruptLineage(t *testing.T) {
+	root := gitInit(t)
+
+	// A commit carrying the begin marker but no matching end marker: parsing it
+	// is a hard error that must propagate rather than being silently skipped.
+	bad := "import foo 9.9 from debian\n\n" + importMetaBegin + "\npkg: foo\n"
+	runGit(t, root, "commit", "--allow-empty", "-qm", bad)
+
+	if _, err := CollectPkgMetadata(root); err == nil {
+		t.Fatal("expected an error on a commit with an unterminated metadata block")
+	}
+}
