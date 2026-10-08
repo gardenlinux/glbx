@@ -19,7 +19,7 @@ import (
 // a single built node's manifest, output blobs, and identity alias.
 func cmdPublish(args []string) error {
 	fs := flag.NewFlagSet("publish", flag.ExitOnError)
-	confDir := fs.String("conf-dir", "", "configuration directory (contains pkgs/, rootfs.yml)")
+	confDir := fs.String("conf-dir", "", "configuration directory")
 	arch := fs.String("arch", buildcfg.HostArch(), "target architecture")
 	cacheDir := fs.String("cache", "", "object-store cache directory")
 	registry := fs.String("registry", "", "target registry reference host[:port]/repo (default $GLBX_REGISTRY)")

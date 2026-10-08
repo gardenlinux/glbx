@@ -12,7 +12,7 @@ import (
 func cmdRestoreCache(args []string) error {
 	fs := flag.NewFlagSet("restore-cache", flag.ExitOnError)
 	cacheDir := fs.String("cache", "", "object-store cache directory")
-	confDir := fs.String("conf-dir", "", "configuration directory (contains pkgs/, rootfs.yml)")
+	confDir := fs.String("conf-dir", "", "configuration directory")
 	arch := fs.String("arch", buildcfg.HostArch(), "target architecture")
 	fs.Parse(args)
 

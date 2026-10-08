@@ -18,7 +18,7 @@ func cmdGraph(args []string) error {
 	fs := flag.NewFlagSet("graph", flag.ExitOnError)
 	arch := fs.String("arch", buildcfg.HostArch(), "target architecture")
 	cacheDir := fs.String("cache", "", "cache directory")
-	confDir := fs.String("conf-dir", "", "configuration directory (contains pkgs/, rootfs.yml)")
+	confDir := fs.String("conf-dir", "", "configuration directory")
 	stubPath := fs.String("stub", "", "path to exec_env_stub binary")
 	outputFile := fs.String("output", "", "output file (default: stdout)")
 	format := fs.String("format", "mermaid", "output format: mermaid or json")

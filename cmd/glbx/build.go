@@ -27,7 +27,7 @@ func cmdBuild(args []string) error {
 	arch := fs.String("arch", buildcfg.HostArch(), "target architecture")
 	jobs := fs.Int("jobs", defaultJobs, "parallel jobs")
 	cacheDir := fs.String("cache", "", "cache directory")
-	confDir := fs.String("conf-dir", "", "configuration directory (contains pkgs/, rootfs.yml)")
+	confDir := fs.String("conf-dir", "", "configuration directory")
 	stubPath := fs.String("stub", "", "path to exec_env_stub binary")
 	invalidate := fs.String("invalidate", "", "delete the map entry for the target with this Key (e.g. rootfs:amd64) and exit")
 	target := fs.String("target", "", "build only the node with this Key (e.g. rootfs:amd64); other nodes must resolve from cache")

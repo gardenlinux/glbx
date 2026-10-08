@@ -55,7 +55,7 @@ func cacheGC(args []string) error {
 	fs := flag.NewFlagSet("gc", flag.ExitOnError)
 	dryRun := fs.Bool("dry-run", false, "show what would be deleted")
 	arch := fs.String("arch", buildcfg.HostArch(), "target architecture for the build graph")
-	confDir := fs.String("conf-dir", "", "configuration directory (contains pkgs/, rootfs.yml)")
+	confDir := fs.String("conf-dir", "", "configuration directory")
 	stubPath := fs.String("stub", "", "path to exec_env_stub binary")
 	fs.Parse(args)
 
