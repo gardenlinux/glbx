@@ -41,8 +41,18 @@ begin/end marker lines, carrying:
 
 - the *package* it belongs to,
 - the *exact upstream version* it records,
-- the *auto-update source* the version came from (e.g. `debian:testing`), which
-  marks whether and from where the package may later be refreshed automatically.
+- the *auto-update source* the version logically tracks (e.g. `debian:testing`),
+  which marks whether and from where the package may later be refreshed
+  automatically.
+
+The auto-update source names the *logical series* a lineage follows, which is
+distinct from the physical location an import's bytes were pulled from. An import
+normally defaults the recorded source to the distribution it fetched, but the two
+can be set apart: an import pulled from a frozen snapshot of the archive at a
+point in time records the series it stands in for, so the commit is
+indistinguishable in lineage and selection terms from an ordinary import of that
+series. The snapshot supplies reproducibility; the marker records only the
+logical identity.
 
 Keeping identity in the commits buys two things. First, it removes a class of
 mistakes: the history itself is the record, baked into each commit's marker, so

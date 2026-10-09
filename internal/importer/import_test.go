@@ -782,6 +782,23 @@ SHA256:
 	}
 }
 
+// TestImportConfigDefaultUpdateTag asserts an unset UpdateTag defaults to
+// "debian:<dist>", while an explicit tag is left untouched so a snapshot replay
+// can record a logical series different from the dist it pulled from.
+func TestImportConfigDefaultUpdateTag(t *testing.T) {
+	cfg := ImportConfig{Dist: "trixie"}
+	cfg.defaults()
+	if cfg.UpdateTag != "debian:trixie" {
+		t.Errorf("default UpdateTag = %q, want %q", cfg.UpdateTag, "debian:trixie")
+	}
+
+	explicit := ImportConfig{Dist: "sid", UpdateTag: "debian:testing"}
+	explicit.defaults()
+	if explicit.UpdateTag != "debian:testing" {
+		t.Errorf("explicit UpdateTag = %q, want it preserved as %q", explicit.UpdateTag, "debian:testing")
+	}
+}
+
 func TestImportRequiredFields(t *testing.T) {
 	store := setupTestStore(t)
 

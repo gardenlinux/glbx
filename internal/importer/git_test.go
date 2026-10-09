@@ -50,23 +50,29 @@ func writeContent(t *testing.T, files map[string]string) string {
 	return dir
 }
 
+// TestImportMetadataRoundTrip asserts the import commit message carries the
+// package, version, and the auto-update tag verbatim — including a tag that
+// differs from the dist, as a snapshot replay records (e.g. pulling from a
+// frozen snapshot while tagging the logical series).
 func TestImportMetadataRoundTrip(t *testing.T) {
-	msg := formatImportMessage("glibc", "2.40-3", "debian:testing")
+	for _, tag := range []string{"debian:testing", "debian:sid", "custom:replay"} {
+		msg := formatImportMessage("glibc", "2.40-3", tag)
 
-	if !strings.HasPrefix(msg, "import glibc 2.40-3 from debian\n") {
-		t.Errorf("unexpected subject line in %q", msg)
-	}
+		if !strings.HasPrefix(msg, "import glibc 2.40-3 from debian\n") {
+			t.Errorf("unexpected subject line in %q", msg)
+		}
 
-	fields, ok, err := parseImportMetadata(msg)
-	if err != nil {
-		t.Fatalf("parse: %v", err)
-	}
-	if !ok {
-		t.Fatal("expected metadata to be recognized")
-	}
-	for k, want := range map[string]string{"pkg": "glibc", "version": "2.40-3", "auto_update": "debian:testing"} {
-		if got := fields[k]; got != want {
-			t.Errorf("%s = %q, want %q", k, got, want)
+		fields, ok, err := parseImportMetadata(msg)
+		if err != nil {
+			t.Fatalf("parse: %v", err)
+		}
+		if !ok {
+			t.Fatal("expected metadata to be recognized")
+		}
+		for k, want := range map[string]string{"pkg": "glibc", "version": "2.40-3", "auto_update": tag} {
+			if got := fields[k]; got != want {
+				t.Errorf("tag %q: %s = %q, want %q", tag, k, got, want)
+			}
 		}
 	}
 }

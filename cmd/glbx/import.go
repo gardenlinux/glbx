@@ -1,8 +1,11 @@
 package main
 
 import (
+	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"syscall"
@@ -25,11 +28,13 @@ func cmdImport(args []string) error {
 	repo := fs.String("repo", "https://deb.debian.org/debian", "APT repository URL")
 	snapshot := fs.String("snapshot", aptrepo.DefaultSnapshotBase, "snapshot archive file endpoint (SHA1-addressed), recorded as a secondary retrieval URL")
 	dist := fs.String("dist", "testing", "distribution")
+	updateTag := fs.String("update-tag", "", "auto-update source recorded in the import commit (default \"debian:<dist>\")")
 	keyring := fs.String("keyring", "/usr/share/keyrings/debian-archive-keyring.gpg", "GPG keyring path")
 	cacheDir := fs.String("cache", "", "object-store cache directory")
 	outputDir := fs.String("output", ".", "working-tree root to import into")
 	noVerify := fs.Bool("no-verify", false, "skip GPG signature verification")
 	noGitHistory := fs.Bool("no-git-history", false, "write pkgs/<package>/ directly instead of recording an import commit")
+	noMerge := fs.Bool("no-merge", false, "build the import commit and print its result as JSON on stdout, without merging")
 	cookie := fs.String("cookie", "", "InRelease cache cookie (reuse a cached InRelease within a session)")
 	fs.Parse(args)
 
@@ -39,12 +44,24 @@ func cmdImport(args []string) error {
 	}
 	pkgName := fs.Arg(0)
 
+	if *noMerge && *noGitHistory {
+		return fmt.Errorf("--no-merge requires git-history mode (it reports the import commit to merge); --no-git-history writes no commit")
+	}
+
 	store, err := openStore(*cacheDir)
 	if err != nil {
 		return fmt.Errorf("open store: %w", err)
 	}
 
-	ctx, l := rootContext(log.Importer)
+	// In --no-merge mode stdout carries the machine-readable result, so route
+	// logs to stderr; otherwise logs go to the console as usual.
+	var ctx context.Context
+	var l *log.Logger
+	if *noMerge {
+		ctx, l = rootContextStderr(log.Importer)
+	} else {
+		ctx, l = rootContext(log.Importer)
+	}
 
 	result, err := importer.Import(importer.ImportConfig{
 		Ctx:          ctx,
@@ -52,6 +69,7 @@ func cmdImport(args []string) error {
 		RepoURL:      *repo,
 		SnapshotBase: *snapshot,
 		Dist:         *dist,
+		UpdateTag:    *updateTag,
 		Keyring:      *keyring,
 		OutputDir:    *outputDir,
 		NoVerify:     *noVerify,
@@ -60,6 +78,10 @@ func cmdImport(args []string) error {
 	}, pkgName)
 	if err != nil {
 		return err
+	}
+
+	if *noMerge {
+		return printImportResult(os.Stdout, result)
 	}
 
 	if !result.Committed {
@@ -92,4 +114,29 @@ func cmdImport(args []string) error {
 	}
 	argv = append(argv, result.CommitHash)
 	return syscall.Exec(gitPath, argv, os.Environ())
+}
+
+// importJSON is the machine-readable result printed on stdout by import
+// --no-merge: one object a driver reads to decide what to do next. An empty
+// commit with already_present true means a prior import already pins this
+// version and there is nothing to merge.
+type importJSON struct {
+	Pkg            string `json:"pkg"`
+	Version        string `json:"version"`
+	Commit         string `json:"commit"`
+	FirstImport    bool   `json:"first_import"`
+	AlreadyPresent bool   `json:"already_present"`
+}
+
+// printImportResult writes the import result as a single JSON object for
+// --no-merge mode.
+func printImportResult(w io.Writer, result *importer.ImportResult) error {
+	obj := importJSON{
+		Pkg:            result.Name,
+		Version:        result.Version,
+		Commit:         result.CommitHash,
+		FirstImport:    result.FirstImport,
+		AlreadyPresent: result.AlreadyPresent,
+	}
+	return json.NewEncoder(w).Encode(obj)
 }

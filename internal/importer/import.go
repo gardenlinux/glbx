@@ -42,6 +42,14 @@ type ImportConfig struct {
 	Keyring   string
 	OutputDir string
 
+	// UpdateTag is the auto-update source recorded in the import commit's
+	// metadata block. Empty defaults to "debian:" + Dist. Decoupling it from
+	// Dist lets an import pull its bytes from one place (e.g. a Debian snapshot
+	// frozen at a point in time) while recording the logical series it tracks, so
+	// the resulting commit is indistinguishable in lineage terms from a normal
+	// import of that series.
+	UpdateTag string
+
 	// SnapshotBase is the hash-addressed snapshot file endpoint recorded as a
 	// secondary retrieval URL for each imported file. Empty uses
 	// aptrepo.DefaultSnapshotBase.
@@ -94,6 +102,9 @@ func (cfg *ImportConfig) defaults() {
 	}
 	if cfg.Keyring == "" {
 		cfg.Keyring = "/usr/share/keyrings/debian-archive-keyring.gpg"
+	}
+	if cfg.UpdateTag == "" {
+		cfg.UpdateTag = "debian:" + cfg.Dist
 	}
 	if cfg.HTTPClient == nil {
 		cfg.HTTPClient = http.DefaultClient
@@ -295,8 +306,7 @@ func extractAndCommit(cfg ImportConfig, srcPkg *sourcePackage, sourceFiles map[s
 		return nil, err
 	}
 
-	autoUpdate := "debian:" + cfg.Dist
-	msg := formatImportMessage(srcPkg.Name, srcPkg.Version, autoUpdate)
+	msg := formatImportMessage(srcPkg.Name, srcPkg.Version, cfg.UpdateTag)
 	parentHash := ""
 	if parent != nil {
 		parentHash = parent.Hash

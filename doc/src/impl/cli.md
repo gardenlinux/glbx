@@ -15,9 +15,16 @@ A hand-rolled subcommand dispatch over `os.Args[1]`, each command owning a
   current branch, so a merge conflict (or clean merge) propagates verbatim as the
   command's own output and exit status. When a prior import already pins the exact
   version resolved from the archive, the import short-circuits before any download
-  (`already present, nothing to do`). `--no-git-history` writes `pkgs/<package>/`
-  directly with no commit; a non-git working tree falls back to that mode with a
-  warning.
+  (`already present, nothing to do`). `--update-tag <tag>` sets the `auto_update`
+  value recorded in the commit (default `debian:<dist>`); setting it decouples the
+  recorded series from the dist actually pulled from, so an import from a frozen
+  snapshot can record the logical series it stands in for. `--no-merge` stops
+  after building the import commit and prints a single JSON object on stdout
+  (`{pkg, version, commit, first_import, already_present}`) with all logging on
+  stderr, leaving HEAD and the working tree untouched for a caller to merge the
+  commit itself; an already-present version prints an empty `commit` with
+  `already_present` true. `--no-git-history` writes `pkgs/<package>/` directly
+  with no commit; a non-git working tree falls back to that mode with a warning.
 - `get-pkg-metadata` — list the commits reachable from HEAD in topological order
   and print the most recent import metadata for each package that currently has a
   directory under `pkgs/`. Topological order places every commit before its
