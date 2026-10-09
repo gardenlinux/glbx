@@ -5,8 +5,11 @@
 A thin resolver wrapper plus the dpkg-based install of a resolved set into a
 root filesystem inside the sandbox: bind the `.deb` blobs in, unpack-all then
 configure-pending to break the pre-dependency cycles. `Bootstrap` creates a
-minimal working root filesystem from an index's essential set;
+minimal working root filesystem from an index's essential set, and
 `BootstrapResolved` does the same from an explicit package set.
+`ResetDpkgDatabase` empties the dpkg database in place, leaving every installed
+file on disk, so a following install reasons only over the packages it is
+given.
 
 ## `internal/build`
 
@@ -23,7 +26,10 @@ store meet.
   build and carried-along edges to co-emitted siblings. Its build action checks
   that every runtime dependency is satisfiable from locally built binaries (with
   a per-binary `lockfile_deps` allowance for tolerated externals), runs an
-  install check in a bootstrapped sandbox, and re-emits the validated `.deb`.
+  install check — bootstrap a working base from the pinned tooling, wipe the
+  dpkg database so dpkg forgets the base while its files remain, then install
+  the binary and its local closure so dpkg configures only our packages — and
+  re-emits the validated `.deb`.
 - **Image** (`Rootfs`): identity folds every transitive binary dependency and
   the pinned image-tooling hashes. Its build action narrows the runtime closure
   to the shipping set, stages the three-layer overlay (payload / throwaway

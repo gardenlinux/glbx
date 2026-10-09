@@ -112,6 +112,26 @@ func Install(ctx context.Context, cont *container.Container, mountNS *container.
 	return InstallResolved(ctx, cont, mountNS, store, rootfsPath, pkgs)
 }
 
+// ResetDpkgDatabase empties the dpkg status database, leaving every installed
+// file on disk. dpkg records installed state entirely in var/lib/dpkg/status;
+// truncating it (and the available catalogue) makes dpkg consider nothing
+// installed, so a subsequent install reasons only over the packages it is given,
+// not the ones that seeded the base — while the on-disk system state those base
+// packages configured (/etc/passwd, the dynamic linker cache, …) is untouched.
+// The per-package files under info/ are keyed by status and are rewritten for
+// whatever is installed next, so they need no clearing.
+func ResetDpkgDatabase(fs container.FsContext, rootfsPath string) error {
+	for _, name := range []string{"status", "available"} {
+		path := rootfsPath + "/var/lib/dpkg/" + name
+		f, err := fs.Open(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)
+		if err != nil {
+			return fmt.Errorf("truncate %s: %w", path, err)
+		}
+		f.Close()
+	}
+	return nil
+}
+
 func execInContainer(ctx context.Context, cont *container.Container, argv []string) error {
 	outR, outW, err := os.Pipe()
 	if err != nil {

@@ -242,6 +242,33 @@ from-source guarantee is enforced: a binary's runtime dependencies must resolve
 to other locally built binaries, so by the time an image is assembled its
 runtime closure is local by construction.
 
+### The install check reasons only over our packages
+
+The install check puts the binary and its local closure into a throwaway root
+filesystem and lets dpkg unpack and configure them. That root filesystem needs a
+functional base — a libc, dpkg itself, the essential tooling — or nothing would
+run, and some maintainer scripts rely on state only the base's own configuration
+produces (base-passwd's postinst, for instance, is what writes `/etc/passwd`, so
+a later `chown root:root` has a `root` user to resolve). So the base is drawn
+from the pinned build tooling and **properly installed and configured** first,
+exactly as a real minimal system is.
+
+The dpkg database is then **wiped**, while every installed file stays on disk.
+dpkg now has no record of any base package. Installing the binary and its local
+closure on top therefore configures only our packages: dpkg reasons over exactly
+the set we build, and never re-runs a base package's maintainer scripts or
+rechecks its dependencies. The base's configured state — `/etc/passwd`, the
+dynamic linker cache, the `/etc` skeleton — remains to satisfy scripts that need
+it.
+
+This matters because the base tooling and our locally built libraries can come
+from different points in the archive's history. Were the base left registered,
+dpkg would try to reconcile a base package that is version-locked to one libc
+against our freshly built one and fail. Wiping the database sidesteps that
+entirely: the base is scaffolding that makes the system functional, and once it
+has served that purpose dpkg's attention is confined to the packages whose
+soundness the check actually exists to prove.
+
 ## Keep the graph shallow
 
 How a package declares its dependencies shapes the whole artifact graph, and the

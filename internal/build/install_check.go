@@ -80,8 +80,12 @@ func (b *debianBinaryPkg) installCheck(ctx context.Context, store *objstore.Stor
 	mountNS := stack.MountNS
 	mountNS.Mkdir("/tmp", 01777)
 
-	// Bootstrap a minimal base from the pinned tooling's essential set — just
-	// enough of a working system (dpkg, libc, …) to run the install check.
+	// Bootstrap a working base from the pinned tooling's essential set: extract
+	// and fully dpkg-configure it, so the chroot has the system state a package's
+	// maintainer scripts assume (a populated /etc/passwd from base-passwd, a
+	// configured libc, ldconfig run, …). This base is drawn from the pinned
+	// tooling, which may be a different point in the archive's history than our
+	// locally built libraries.
 	cont, rootfsPath, contCleanup, err := install.Bootstrap(ctx, mountNS, store, bootstrapIndex, b.sourceBuild.Arch, stubPath)
 	if err != nil {
 		return fmt.Errorf("bootstrap for install check: %w", err)
@@ -92,10 +96,21 @@ func (b *debianBinaryPkg) installCheck(ctx context.Context, store *objstore.Stor
 		}
 	}()
 
-	// Install the binary's local closure on top of the configured base. The
-	// locality check already proved every runtime dependency is locally built
-	// (or an allowed external); this step proves the binary physically unpacks
-	// and configures with dpkg.
+	// Wipe the dpkg database, keeping the base's files on disk. dpkg now has no
+	// record of the base packages, so installing our local closure on top does
+	// not re-configure them or check their dependencies — dpkg reasons only over
+	// the packages we build. The base's filesystem state (/etc/passwd, the
+	// configured libc, …) remains to satisfy maintainer scripts, while a base
+	// package whose version is coupled to a different libc than ours can no
+	// longer break the install by being reconfigured against the wrong library.
+	if err := install.ResetDpkgDatabase(mountNS, rootfsPath); err != nil {
+		return fmt.Errorf("reset dpkg database for install check: %w", err)
+	}
+
+	// Install the binary's local closure on top of the wiped base. The locality
+	// check already proved every runtime dependency is locally built (or an
+	// allowed external); this step proves the binary physically unpacks and
+	// configures with dpkg against a database that knows only our packages.
 	if err := install.InstallResolved(ctx, cont, mountNS, store, rootfsPath, resolved); err != nil {
 		return fmt.Errorf("install check failed for %s: %w", b.name, err)
 	}
