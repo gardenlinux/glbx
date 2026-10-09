@@ -36,6 +36,19 @@ A hand-rolled subcommand dispatch over `os.Args[1]`, each command owning a
   `pkg`, `version`, and `auto_update`. `--format` selects `yaml` (default) or
   `json` output. `--conf-dir` selects the configuration directory (the working
   tree holding `pkgs/`), auto-discovered from the working directory when omitted.
+- `check-updates [package ...]` — report, for each present package, whether the
+  version an import would select from the configured repo/dist is newer than the
+  version currently pinned on its lineage. The candidate set is the present
+  packages (`get-pkg-metadata`'s list); `--update-tag <tag>` keeps only those
+  whose recorded `auto_update` matches, and positional package names narrow it
+  further. The Sources index is loaded once and queried for every candidate, so
+  checking many packages costs a single archive-metadata fetch; `--cookie` keys
+  that InRelease in the store so a later run (or a following `import`) reuses the
+  same signed snapshot. `--format text` (default) prints one `name old -> new`
+  line per updatable package on stdout with all logging on stderr; `--format
+  json` prints an array of `{pkg, old, new}`. A pinned package the archive no
+  longer offers is logged and skipped, not reported as an update. `--repo`,
+  `--dist`, `--keyring`, `--no-verify`, and `--conf-dir` are as for `import`.
 - `lockfile` / `lockfile-rootfs` — generate a package's build-tooling lock, or
   the image configuration-tooling lock.
 - `build` — drive the engine over the discovered artifact graph, with the

@@ -140,28 +140,14 @@ func Import(cfg ImportConfig, packageName string) (*ImportResult, error) {
 		l.Warn("%s is not a git repository; writing pkgs/%s directly without import history", cfg.OutputDir, packageName)
 	}
 
-	releasePayload, err := aptrepo.FetchInRelease(cfg.Ctx, aptrepo.FetchConfig{
-		Store:      cfg.Store,
-		RepoURL:    cfg.RepoURL,
-		Dist:       cfg.Dist,
-		Cookie:     cfg.Cookie,
-		Keyring:    cfg.Keyring,
-		NoVerify:   cfg.NoVerify,
-		HTTPClient: cfg.HTTPClient,
-		Component:  log.Importer,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("importer: %w", err)
-	}
-
-	releaseHashes, err := aptrepo.ParseReleaseHashes(releasePayload)
-	if err != nil {
-		return nil, fmt.Errorf("importer: parsing Release hashes: %w", err)
-	}
-
-	srcPkg, err := fetchSourcePackageStanza(cfg, releaseHashes, packageName)
+	idx, err := loadSourceIndex(cfg)
 	if err != nil {
 		return nil, err
+	}
+
+	srcPkg, err := idx.highest(packageName)
+	if err != nil {
+		return nil, fmt.Errorf("importer: %w", err)
 	}
 
 	// In git mode, locate the previous import before downloading: an unchanged
@@ -194,10 +180,73 @@ func Import(cfg ImportConfig, packageName string) (*ImportResult, error) {
 	return extractAndCommit(cfg, srcPkg, sourceFiles, sourceSHA1, parent)
 }
 
-// fetchSourcePackageStanza downloads main/source/Sources.gz (using the SHA256
-// from the verified Release hashes as a content-addressed cache key),
-// decompresses it, and returns the highest-version stanza for packageName.
-func fetchSourcePackageStanza(cfg ImportConfig, releaseHashes map[string]string, packageName string) (*sourcePackage, error) {
+// sourceIndex is the decompressed main/source Sources index for one repo/dist,
+// loaded once so many package lookups reuse one download and one parse. The
+// highest-version stanza per package name is parsed lazily on first query.
+type sourceIndex struct {
+	data   []byte
+	byName map[string]*sourcePackage
+}
+
+// loadSourceIndex fetches and verifies the InRelease, reads the Sources index
+// hash from it, downloads main/source/Sources.gz (served from the object store
+// by its content hash on a repeat), decompresses it, and returns an index that
+// resolves the highest version for a package name. One load serves any number
+// of lookups, so a caller checking many packages fetches and parses the archive
+// metadata exactly once.
+func loadSourceIndex(cfg ImportConfig) (*sourceIndex, error) {
+	cfg.defaults()
+	if cfg.Store == nil {
+		return nil, fmt.Errorf("importer: Store is required")
+	}
+
+	releasePayload, err := aptrepo.FetchInRelease(cfg.Ctx, aptrepo.FetchConfig{
+		Store:      cfg.Store,
+		RepoURL:    cfg.RepoURL,
+		Dist:       cfg.Dist,
+		Cookie:     cfg.Cookie,
+		Keyring:    cfg.Keyring,
+		NoVerify:   cfg.NoVerify,
+		HTTPClient: cfg.HTTPClient,
+		Component:  log.Importer,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("importer: %w", err)
+	}
+
+	releaseHashes, err := aptrepo.ParseReleaseHashes(releasePayload)
+	if err != nil {
+		return nil, fmt.Errorf("importer: parsing Release hashes: %w", err)
+	}
+
+	data, err := fetchSourcesIndex(cfg, releaseHashes)
+	if err != nil {
+		return nil, err
+	}
+	return &sourceIndex{data: data}, nil
+}
+
+// highest returns the highest-version stanza for packageName, parsing the whole
+// index into a name→best map on first call and reusing it thereafter.
+func (idx *sourceIndex) highest(packageName string) (*sourcePackage, error) {
+	if idx.byName == nil {
+		byName, err := parseAllSourcePackages(idx.data)
+		if err != nil {
+			return nil, err
+		}
+		idx.byName = byName
+	}
+	pkg, ok := idx.byName[packageName]
+	if !ok {
+		return nil, fmt.Errorf("package %q not found in Sources index", packageName)
+	}
+	return pkg, nil
+}
+
+// fetchSourcesIndex downloads main/source/Sources.gz (using the SHA256 from the
+// verified Release hashes as a content-addressed cache key), decompresses it,
+// and returns the raw Sources bytes.
+func fetchSourcesIndex(cfg ImportConfig, releaseHashes map[string]string) ([]byte, error) {
 	l := log.From(cfg.Ctx, log.Importer)
 
 	sourcesPath := "main/source/Sources.gz"
@@ -247,12 +296,7 @@ func fetchSourcePackageStanza(cfg ImportConfig, releaseHashes map[string]string,
 	if err != nil {
 		return nil, fmt.Errorf("importer: reading decompressed Sources: %w", err)
 	}
-
-	srcPkg, err := findSourcePackage(sourcesData, packageName)
-	if err != nil {
-		return nil, fmt.Errorf("importer: %w", err)
-	}
-	return srcPkg, nil
+	return sourcesData, nil
 }
 
 // extractInto populates destDir with the package's extracted packaging and
@@ -389,6 +433,52 @@ func findSourcePackage(sourcesData []byte, packageName string) (*sourcePackage, 
 		return nil, fmt.Errorf("package %q not found in Sources index", packageName)
 	}
 	return best, nil
+}
+
+// parseAllSourcePackages parses every stanza of the Sources index in one pass,
+// returning the highest-version stanza for each package name. It is the
+// query-many counterpart to findSourcePackage: one parse serves lookups of any
+// number of packages against the same index.
+func parseAllSourcePackages(sourcesData []byte) (map[string]*sourcePackage, error) {
+	reader := deb822.NewReader(bytes.NewReader(sourcesData))
+
+	byName := make(map[string]*sourcePackage)
+	for {
+		stanza, err := reader.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return nil, fmt.Errorf("parsing Sources index: %w", err)
+		}
+
+		name, ok := stanza["package"]
+		if !ok {
+			continue
+		}
+
+		if cur, ok := byName[name]; ok && version.Compare(stanza["version"], cur.Version) <= 0 {
+			continue
+		}
+
+		sha256Field, ok := stanza["checksums-sha256"]
+		if !ok {
+			return nil, fmt.Errorf("package %s missing Checksums-Sha256 field", name)
+		}
+		files, err := parseFileList(sha256Field)
+		if err != nil {
+			return nil, fmt.Errorf("parsing file list for %s: %w", name, err)
+		}
+
+		byName[name] = &sourcePackage{
+			Name:      name,
+			Version:   stanza["version"],
+			Format:    stanza["format"],
+			Directory: stanza["directory"],
+			Files:     files,
+		}
+	}
+	return byName, nil
 }
 
 // parseFileList parses the Checksums-Sha256 field into a list of sourceFiles.

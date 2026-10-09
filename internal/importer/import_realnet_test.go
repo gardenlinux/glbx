@@ -31,6 +31,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/gardenlinux/glbx/internal/debian/version"
 	"github.com/gardenlinux/glbx/internal/objstore"
 )
 
@@ -393,5 +394,44 @@ func TestImportGitMode(t *testing.T) {
 	}
 	if headAfter := strings.TrimSpace(runGit(t, root, "rev-parse", "HEAD")); headAfter != headBefore {
 		t.Errorf("HEAD moved on a no-op re-import: %s -> %s", headBefore, headAfter)
+	}
+}
+
+// TestCheckUpdatesRealnet pins hello at an artificially old version and confirms
+// CheckUpdates, resolving the live archive, reports an update to the real
+// current version. A second pin at a tag the check does not ask for must be
+// filtered out, so the live run also exercises --update-tag.
+func TestCheckUpdatesRealnet(t *testing.T) {
+	requireRealnet(t)
+
+	root := gitInit(t)
+	// Pin hello at a version below anything the archive will ever hold, so the
+	// archive's current hello is unambiguously an update.
+	importAndMergeTag(t, root, "hello", "0.0", "", "debian:testing")
+	// A package tracking another series must be ignored by a testing check. Use
+	// a real source name so the index lookup succeeds but the tag filter drops it.
+	importAndMergeTag(t, root, "bash", "0.0", "", "debian:sid")
+
+	updates, err := CheckUpdates(CheckConfig{
+		Import: ImportConfig{
+			Ctx:      context.Background(),
+			Store:    sharedRealnet.store,
+			NoVerify: true,
+		},
+		ConfDir:   root,
+		UpdateTag: "debian:testing",
+	})
+	if err != nil {
+		t.Fatalf("CheckUpdates: %v", err)
+	}
+
+	if len(updates) != 1 || updates[0].Pkg != "hello" {
+		t.Fatalf("expected one update for hello (bash filtered by tag), got %+v", updates)
+	}
+	if updates[0].Old != "0.0" {
+		t.Errorf("old = %q, want 0.0", updates[0].Old)
+	}
+	if version.Compare(updates[0].New, "0.0") <= 0 {
+		t.Errorf("new = %q, expected a real version above 0.0", updates[0].New)
 	}
 }

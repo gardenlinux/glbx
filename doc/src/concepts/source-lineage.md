@@ -85,6 +85,13 @@ have a directory under `pkgs/`, so a package removed from the tree drops out of 
 baseline even while its lineage remains in history. This is how a refresh pass
 learns what each lineage currently holds before deciding what to update.
 
+Update detection builds on this directly: for each baseline, glbx resolves the
+highest version the configured repo/dist currently offers and reports the package
+when that version orders above the pinned one. The candidate set is filtered by
+the recorded auto-update tag, so a refresh of one logical series considers only
+the lineages tracking it. The archive metadata is read once and queried for every
+candidate, so a whole-tree check costs one fetch of the signed index.
+
 ## What a pristine commit contains
 
 A pristine import commit records **only upstream source**: the content needed to

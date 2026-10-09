@@ -239,10 +239,16 @@ func TestIsGitRepo(t *testing.T) {
 // commit hash, or empty for a first (orphan) import.
 func importAndMerge(t *testing.T, root, pkg, ver, parent string) string {
 	t.Helper()
+	return importAndMergeTag(t, root, pkg, ver, parent, "debian:testing")
+}
+
+// importAndMergeTag is importAndMerge with an explicit auto_update tag.
+func importAndMergeTag(t *testing.T, root, pkg, ver, parent, tag string) string {
+	t.Helper()
 	content := writeContent(t, map[string]string{
 		"debian/control": "Source: " + pkg + "\n" + ver + "\n",
 	})
-	commit, err := commitImportTree(root, content, pkg, formatImportMessage(pkg, ver, "debian:testing"), parent)
+	commit, err := commitImportTree(root, content, pkg, formatImportMessage(pkg, ver, tag), parent)
 	if err != nil {
 		t.Fatalf("commitImportTree(%s %s): %v", pkg, ver, err)
 	}
