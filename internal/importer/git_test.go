@@ -183,6 +183,71 @@ func TestFindPreviousImport(t *testing.T) {
 	}
 }
 
+// TestFindPreviousImportThroughPrunedMerge covers an import that reaches HEAD
+// only through the non-first parent of a merge whose pkgs/<pkg> tree matches the
+// first parent. Default git-log history simplification would follow the first
+// parent alone and prune the side holding the import, making the package look
+// never-imported and the next import an orphan with no common history. The walk
+// must still find it.
+func TestFindPreviousImportThroughPrunedMerge(t *testing.T) {
+	root := gitInit(t)
+
+	// Seed commit carries pkgs/foo but no import marker.
+	writeFoo := func(body string) {
+		dir := filepath.Join(root, "pkgs/foo/debian")
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "control"), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writeFoo("Source: foo\nv0\n")
+	runGit(t, root, "add", "-A")
+	runGit(t, root, "commit", "-qm", "seed foo")
+
+	// The real import of foo: an orphan commit whose tree is exactly pkgs/foo,
+	// built the way the importer builds it so it passes lineage validation.
+	imp, err := commitImportTree(root, writeContent(t, map[string]string{
+		"debian/control": "Source: foo\nv1\n",
+	}), "foo", formatImportMessage("foo", "1.0", "debian:testing"), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Side branch off the seed, merge the import in, then restore pkgs/foo to
+	// the seed content so the side tip's pkgs/foo tree matches the first parent.
+	runGit(t, root, "checkout", "-q", "-b", "side")
+	runGit(t, root, "merge", "--no-edit", "--allow-unrelated-histories", "-X", "theirs", imp)
+	writeFoo("Source: foo\nv0\n")
+	runGit(t, root, "add", "-A")
+	runGit(t, root, "commit", "-qm", "restore foo on side")
+
+	// First-parent spine advances without touching pkgs/foo, then merges the
+	// side in keeping its own pkgs/foo (-X ours): the merge's pkgs/foo tree
+	// equals the first parent, so default simplification prunes the side.
+	runGit(t, root, "checkout", "-q", "main")
+	if err := os.WriteFile(filepath.Join(root, "README"), []byte("spine\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, root, "commit", "-aqm", "advance spine")
+	runGit(t, root, "merge", "--no-edit", "-X", "ours", "side")
+
+	prev, err := findPreviousImport(root, "foo")
+	if err != nil {
+		t.Fatalf("findPreviousImport: %v", err)
+	}
+	if prev == nil {
+		t.Fatal("import hidden behind a pruned merge was not found")
+	}
+	if prev.Hash != imp {
+		t.Errorf("found %s, want import commit %s", prev.Hash, imp)
+	}
+	if prev.Version != "1.0" {
+		t.Errorf("version = %q, want 1.0", prev.Version)
+	}
+}
+
 func TestFindPreviousImportRejectsCorruptLineage(t *testing.T) {
 	root := gitInit(t)
 

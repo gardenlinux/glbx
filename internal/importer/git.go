@@ -97,8 +97,14 @@ func findPreviousImport(root, pkg string) (*importCommit, error) {
 		return nil, nil
 	}
 
+	// --full-history disables history simplification: when a merge brings the
+	// import onto a side branch whose pkgs/<pkg> tree matches the first parent,
+	// default path-filtered git log follows only the first parent and prunes the
+	// side holding the import, hiding it from the walk. --topo-order keeps the
+	// output strictly newest-ancestor-first so the first marker match is the
+	// most recent import.
 	pkgPath := path.Join("pkgs", pkg)
-	out, err := exec.Command("git", "-C", root, "log", "--format=%H", "--", pkgPath).Output()
+	out, err := exec.Command("git", "-C", root, "log", "--full-history", "--topo-order", "--format=%H", "--", pkgPath).Output()
 	if err != nil {
 		return nil, fmt.Errorf("listing history for %s: %w", pkgPath, err)
 	}
