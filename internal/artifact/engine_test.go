@@ -38,7 +38,7 @@ func (m *mockArtifact) Key() string          { return m.name }
 func (m *mockArtifact) Depends() []Artifact  { return m.deps }
 func (m *mockArtifact) Includes() []Artifact { return m.includes }
 func (m *mockArtifact) Inputs() []Input      { return m.inputs }
-func (m *mockArtifact) String() string       { return m.name }
+func (m *mockArtifact) ShortName() string    { return m.name }
 
 func (m *mockArtifact) OutputRefs(store *objstore.Store) (objstore.Hash, []objstore.Hash, error) {
 	return ResolveOutputRefs(m, store)
@@ -73,7 +73,7 @@ func TestGraphSingleNode(t *testing.T) {
 		t.Fatal(err)
 	}
 	order := g.TopologicalOrder()
-	if len(order) != 1 || order[0].String() != "A" {
+	if len(order) != 1 || order[0].Key() != "A" {
 		t.Fatalf("unexpected order: %v", order)
 	}
 }
@@ -93,7 +93,7 @@ func TestGraphLinearChain(t *testing.T) {
 	if len(order) != 3 {
 		t.Fatalf("expected 3, got %d", len(order))
 	}
-	if order[0].String() != "C" || order[1].String() != "B" || order[2].String() != "A" {
+	if order[0].Key() != "C" || order[1].Key() != "B" || order[2].Key() != "A" {
 		t.Fatalf("wrong order: %v", order)
 	}
 }
@@ -218,10 +218,10 @@ func TestEngineFailure(t *testing.T) {
 
 	var bFailed, aSkipped bool
 	for _, r := range results {
-		if r.Artifact.String() == "B" && r.Err != nil {
+		if r.Artifact.Key() == "B" && r.Err != nil {
 			bFailed = true
 		}
-		if r.Artifact.String() == "A" && r.Err != nil {
+		if r.Artifact.Key() == "A" && r.Err != nil {
 			aSkipped = true
 		}
 	}

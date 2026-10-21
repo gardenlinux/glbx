@@ -116,8 +116,8 @@ func (s *DebianPkgBuild) Key() string {
 	return fmt.Sprintf("debian-pkg-build:%s:%s", s.Name, s.Arch)
 }
 
-func (s *DebianPkgBuild) String() string {
-	return fmt.Sprintf("debian-pkg-build:%s", s.Name)
+func (s *DebianPkgBuild) ShortName() string {
+	return s.Name
 }
 
 func (s *DebianPkgBuild) Depends() []artifact.Artifact {

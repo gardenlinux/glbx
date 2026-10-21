@@ -32,8 +32,8 @@ func (b *debianBinaryPkg) Key() string {
 	return fmt.Sprintf("debian-binary-pkg:%s:%s:%s", b.sourceBuild.Name, b.name, b.sourceBuild.Arch)
 }
 
-func (b *debianBinaryPkg) String() string {
-	return fmt.Sprintf("binary-pkg:%s", b.name)
+func (b *debianBinaryPkg) ShortName() string {
+	return b.name
 }
 
 func (b *debianBinaryPkg) Depends() []artifact.Artifact {

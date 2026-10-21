@@ -88,7 +88,7 @@ func newRootfsDirect(arch string, deps []*debianBinaryPkg, store *objstore.Store
 	}
 }
 
-func (r *Rootfs) String() string {
+func (r *Rootfs) ShortName() string {
 	return "rootfs"
 }
 

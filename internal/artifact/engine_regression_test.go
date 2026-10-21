@@ -162,7 +162,7 @@ func TestEngineInputSubsetEnforcement(t *testing.T) {
 	// inputs (outsider was not built before consumer since no dep edge exists).
 	var consumerResult *BuildResult
 	for i, r := range results {
-		if r.Artifact.String() == "consumer" {
+		if r.Artifact.Key() == "consumer" {
 			consumerResult = &results[i]
 			break
 		}
@@ -272,7 +272,7 @@ func TestEngineFailurePropagationParallel(t *testing.T) {
 
 	resultMap := make(map[string]BuildResult)
 	for _, r := range results {
-		resultMap[r.Artifact.String()] = r
+		resultMap[r.Artifact.Key()] = r
 	}
 
 	if resultMap["failing"].Err == nil {

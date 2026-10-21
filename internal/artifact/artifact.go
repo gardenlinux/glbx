@@ -54,5 +54,9 @@ type Artifact interface {
 	// references. Returns an error if the artifact has not been built (no map
 	// entry), so graph-walking callers (GC, upload) can skip on error.
 	OutputRefs(store *objstore.Store) (manifest objstore.Hash, leaves []objstore.Hash, err error)
-	String() string
+	// ShortName is the display label for the node: the unique part only (the
+	// source or binary package name, or "rootfs"), with no type prefix. Unlike
+	// Key it is not guaranteed globally unique — it is for human-facing output,
+	// not identity.
+	ShortName() string
 }

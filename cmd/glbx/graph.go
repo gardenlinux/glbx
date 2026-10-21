@@ -98,15 +98,22 @@ func cmdGraph(args []string) error {
 	return nil
 }
 
-// graphExport is the canonical serialized form of the dependency graph: node
-// Keys in stable topological order and built-from edges sorted deterministically.
-// It records structure only (no identities), so it changes when the graph's
-// shape changes, not on every source edit. BuiltStatus is populated only by
-// --check-built and is omitted otherwise, keeping the plain export stable.
+// graphExport is the canonical serialized form of the dependency graph: nodes in
+// stable topological order and built-from edges sorted deterministically. It
+// records structure only (no identities), so it changes when the graph's shape
+// changes, not on every source edit. Each node carries its Key (the unique build
+// handle, used by edges and BuiltStatus) and its ShortName (a display label).
+// BuiltStatus is populated only by --check-built and is omitted otherwise,
+// keeping the plain export stable.
 type graphExport struct {
-	Nodes       []string          `json:"nodes"`
+	Nodes       []graphExportNode `json:"nodes"`
 	Edges       []graphExportEdge `json:"edges"`
 	BuiltStatus map[string]bool   `json:"builtStatus,omitempty"`
+}
+
+type graphExportNode struct {
+	Key       string `json:"key"`
+	ShortName string `json:"shortName"`
 }
 
 type graphExportEdge struct {
@@ -116,12 +123,12 @@ type graphExportEdge struct {
 
 // graphJSON renders the graph as deterministic, machine-readable JSON with a
 // trailing newline. builtStatus, when non-nil, is attached as the per-node
-// built map.
+// built map keyed by node Key.
 func graphJSON(g *artifact.Graph, builtStatus map[string]bool) (string, error) {
 	order := g.StableTopologicalOrder()
-	nodes := make([]string, len(order))
+	nodes := make([]graphExportNode, len(order))
 	for i, a := range order {
-		nodes[i] = a.Key()
+		nodes[i] = graphExportNode{Key: a.Key(), ShortName: a.ShortName()}
 	}
 	edges := g.Edges()
 	exp := graphExport{Nodes: nodes, Edges: make([]graphExportEdge, len(edges)), BuiltStatus: builtStatus}

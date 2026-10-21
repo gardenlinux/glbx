@@ -194,11 +194,11 @@ func (g *Graph) detectCycles() error {
 	var visit func(n *node) error
 	visit = func(n *node) error {
 		colors[n] = gray
-		stack = append(stack, n.artifact.String())
+		stack = append(stack, n.artifact.Key())
 		for _, dep := range n.deps {
 			switch colors[dep] {
 			case gray:
-				stack = append(stack, dep.artifact.String())
+				stack = append(stack, dep.artifact.Key())
 				return fmt.Errorf("cycle detected: %v", stack)
 			case white:
 				if err := visit(dep); err != nil {
