@@ -1,9 +1,13 @@
 package build
 
 import (
+	"archive/tar"
+	"compress/gzip"
 	"context"
+	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/gardenlinux/glbx/internal/artifact"
@@ -84,5 +88,39 @@ func TestImageBuildE2E(t *testing.T) {
 	}
 	if manifest.IsZero() || len(leaves) == 0 {
 		t.Fatalf("no image outputs: manifest=%s leaves=%d", manifest, len(leaves))
+	}
+
+	// The /pkgs staging area used to bind-mount local .debs for dpkg must not
+	// survive into the packed image.
+	assertNoPkgsStaging(t, store, leaves[0])
+}
+
+// assertNoPkgsStaging fails if the packed rootfs tar contains a top-level pkgs/
+// entry (the directory or any staged .deb beneath it).
+func assertNoPkgsStaging(t *testing.T, store *objstore.Store, tarGz objstore.Hash) {
+	t.Helper()
+	rc, err := store.Blobs.Open(tarGz)
+	if err != nil {
+		t.Fatalf("open rootfs blob: %v", err)
+	}
+	defer rc.Close()
+	gz, err := gzip.NewReader(rc)
+	if err != nil {
+		t.Fatalf("gunzip rootfs: %v", err)
+	}
+	defer gz.Close()
+	tr := tar.NewReader(gz)
+	for {
+		hdr, err := tr.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			t.Fatalf("read rootfs tar: %v", err)
+		}
+		name := strings.TrimPrefix(hdr.Name, "./")
+		if name == "pkgs" || name == "pkgs/" || strings.HasPrefix(name, "pkgs/") {
+			t.Errorf("packed rootfs contains staging entry %q", hdr.Name)
+		}
 	}
 }

@@ -421,7 +421,8 @@ func (r *Rootfs) runDpkg(ctx context.Context, mountNS *container.MountNS, store 
 	}
 	l.Debug("overlay mounted at %s", paths.merged)
 
-	if err := r.setupRootfsRepo(mountNS, store, installPkgs, inputs, paths.merged); err != nil {
+	pkgMounts, err := r.setupRootfsRepo(mountNS, store, installPkgs, inputs, paths.merged)
+	if err != nil {
 		return fmt.Errorf("setup rootfs repo: %w", err)
 	}
 
@@ -461,6 +462,22 @@ func (r *Rootfs) runDpkg(ctx context.Context, mountNS *container.MountNS, store 
 
 	cont.Close()
 
+	// Tear down the /pkgs staging area before the overlay is unmounted so its
+	// removal is recorded in the writable upper layer and it does not appear in
+	// the packed rootfs: unmount each per-deb bind, unlink its target, then
+	// remove the now-empty directory.
+	for _, p := range pkgMounts {
+		if err := mountNS.Umount(p, syscall.MNT_DETACH); err != nil {
+			return fmt.Errorf("unmount staged deb %s: %w", p, err)
+		}
+		if err := mountNS.Unlink(p); err != nil {
+			return fmt.Errorf("remove staged deb %s: %w", p, err)
+		}
+	}
+	if err := mountNS.Rmdir(paths.merged + "/pkgs"); err != nil {
+		return fmt.Errorf("remove /pkgs staging dir: %w", err)
+	}
+
 	if err := mountNS.Umount(paths.merged, syscall.MNT_DETACH); err != nil {
 		return fmt.Errorf("umount overlay: %w", err)
 	}
@@ -492,12 +509,14 @@ func (r *Rootfs) packFinal(ctx context.Context, mountNS *container.MountNS, stor
 // setupRootfsRepo bind-mounts each locally-built .deb into rootfs/pkgs/ at its
 // canonical <name>_<ver>_<arch>.deb path so the in-container `dpkg --unpack
 // /pkgs/*.deb` step has every package available. No apt repo metadata is
-// written — installation is dpkg-only.
-func (r *Rootfs) setupRootfsRepo(mountNS *container.MountNS, store *objstore.Store, localPkgs []rootfsLocalPkg, inputs map[string]objstore.Hash, rootfs string) error {
+// written — installation is dpkg-only. It returns the target paths it mounted
+// so the staging area can be torn down before the image is packed.
+func (r *Rootfs) setupRootfsRepo(mountNS *container.MountNS, store *objstore.Store, localPkgs []rootfsLocalPkg, inputs map[string]objstore.Hash, rootfs string) ([]string, error) {
 	if err := mountNS.Mkdir(rootfs+"/pkgs", 0755); err != nil {
-		return fmt.Errorf("mkdir /pkgs: %w", err)
+		return nil, fmt.Errorf("mkdir /pkgs: %w", err)
 	}
 
+	var mounted []string
 	for _, lp := range localPkgs {
 		blobPath, err := store.Blobs.Path(lp.debHash)
 		if err != nil {
@@ -535,9 +554,10 @@ func (r *Rootfs) setupRootfsRepo(mountNS *container.MountNS, store *objstore.Sto
 		if err := mountNS.Mount(blobPath, targetPath, "", syscall.MS_BIND|syscall.MS_RDONLY, ""); err != nil {
 			continue
 		}
+		mounted = append(mounted, targetPath)
 	}
 
-	return nil
+	return mounted, nil
 }
 
 // packRootfsTarFromMountNS packs the rootfs directory (inside the MountNS) as
