@@ -51,11 +51,18 @@ func (b *localBlobs) Has(h Hash) bool {
 	return err == nil
 }
 
-// Path returns the filesystem path a blob would occupy. It does not check that
-// the blob exists; the error exists for implementations that may fail to make a
-// blob locally available.
+// Path returns the filesystem path of an existing blob. It errors if the blob is
+// absent, so a caller that hands the path to another tool gets a clear miss here
+// rather than an opaque failure downstream.
 func (b *localBlobs) Path(h Hash) (string, error) {
-	return b.path(h), nil
+	p := b.path(h)
+	if _, err := os.Stat(p); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return "", fmt.Errorf("blob %s not found", h)
+		}
+		return "", fmt.Errorf("stat blob %s: %w", h, err)
+	}
+	return p, nil
 }
 
 // Open returns a reader over the blob's bytes, or an error if it is absent.

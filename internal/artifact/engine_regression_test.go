@@ -45,7 +45,7 @@ func TestEngineRunDoesNotLeakGoroutines(t *testing.T) {
 		}
 		for _, r := range results {
 			if r.Err != nil {
-				t.Fatalf("iter %d: unexpected error for %s: %v", iter, r.Artifact, r.Err)
+				t.Fatalf("iter %d: unexpected error for %s: %v", iter, r.Artifact.Key(), r.Err)
 			}
 		}
 	}
@@ -112,7 +112,7 @@ func TestEngineRunRaceCondition(t *testing.T) {
 
 	for _, r := range results {
 		if r.Err != nil {
-			t.Fatalf("unexpected error for %s: %v", r.Artifact, r.Err)
+			t.Fatalf("unexpected error for %s: %v", r.Artifact.Key(), r.Err)
 		}
 	}
 }
@@ -358,7 +358,7 @@ func TestDiscoverTransitiveInputResolution(t *testing.T) {
 
 	for _, r := range results {
 		if r.Err != nil {
-			t.Fatalf("build error for %s: %v", r.Artifact, r.Err)
+			t.Fatalf("build error for %s: %v", r.Artifact.Key(), r.Err)
 		}
 	}
 }
@@ -398,7 +398,7 @@ func TestBuildIdempotent(t *testing.T) {
 	}
 	for _, r := range results {
 		if r.Err != nil {
-			t.Fatalf("unexpected error for %s: %v", r.Artifact, r.Err)
+			t.Fatalf("unexpected error for %s: %v", r.Artifact.Key(), r.Err)
 		}
 	}
 }

@@ -121,16 +121,31 @@ func TestBlobs_OpenNonExistent(t *testing.T) {
 
 func TestBlobs_Path(t *testing.T) {
 	b := setupBlobs(t)
-	h := MustHash("9a09690faf8b2b09cb02be917387a121be291af320548a1600b5105bc646be53")
+	h, err := b.Store(bytes.NewReader([]byte("addressable content")))
+	if err != nil {
+		t.Fatalf("Store: %v", err)
+	}
 	path, err := b.Path(h)
 	if err != nil {
 		t.Fatalf("Path: %v", err)
 	}
-	if !strings.Contains(path, "9a") {
+	if !strings.Contains(path, h.Prefix()) {
 		t.Errorf("Path should contain prefix shard, got %q", path)
 	}
-	if !strings.HasSuffix(path, "09690faf8b2b09cb02be917387a121be291af320548a1600b5105bc646be53") {
+	if !strings.HasSuffix(path, h.Suffix()) {
 		t.Errorf("Path should end with suffix, got %q", path)
+	}
+}
+
+func TestBlobs_Path_Absent(t *testing.T) {
+	b := setupBlobs(t)
+	h := MustHash("9a09690faf8b2b09cb02be917387a121be291af320548a1600b5105bc646be53")
+	_, err := b.Path(h)
+	if err == nil {
+		t.Fatal("Path should return error for non-existent blob")
+	}
+	if !strings.Contains(err.Error(), "not found") {
+		t.Errorf("error should mention 'not found', got: %v", err)
 	}
 }
 

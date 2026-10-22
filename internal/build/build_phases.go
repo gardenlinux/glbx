@@ -93,7 +93,7 @@ func (s *DebianPkgBuild) setupBuildEnv(ctx context.Context, store *objstore.Stor
 			continue
 		}
 		blobPath, err := store.Blobs.Path(hash)
-		if err != nil || !store.Blobs.Has(hash) {
+		if err != nil {
 			continue
 		}
 		if err := container.Run(mountNS, &container.ExecRequest{

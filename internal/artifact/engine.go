@@ -261,7 +261,7 @@ func (e *Engine) run(ctx context.Context, hooks runHooks) ([]BuildResult, error)
 			hooks.nodeSkipped(n, reason)
 		}
 		for _, rdep := range n.rdeps {
-			skipNode(rdep, fmt.Sprintf("dependency %s was skipped", n.artifact))
+			skipNode(rdep, fmt.Sprintf("dependency %s was skipped", n.artifact.Key()))
 		}
 	}
 
@@ -295,7 +295,7 @@ func (e *Engine) run(ctx context.Context, hooks runHooks) ([]BuildResult, error)
 
 			if n.state == stateFailed {
 				for _, rdep := range n.rdeps {
-					skipNode(rdep, fmt.Sprintf("dependency %s failed", n.artifact))
+					skipNode(rdep, fmt.Sprintf("dependency %s failed", n.artifact.Key()))
 				}
 			} else {
 				for _, rdep := range n.rdeps {
@@ -327,7 +327,7 @@ func (e *Engine) buildNode(ctx context.Context, n *node) BuildResult {
 	l := log.From(ctx, log.Engine)
 
 	fail := func(err error) BuildResult {
-		l.Error("FAILED: %s: %v", n.artifact, err)
+		l.Error("FAILED: %s: %v", n.artifact.Key(), err)
 		return BuildResult{Artifact: n.artifact, Err: err}
 	}
 
@@ -341,7 +341,7 @@ func (e *Engine) buildNode(ctx context.Context, n *node) BuildResult {
 	// the manifest + leaves) rather than triggering a rebuild. A miss with no
 	// remote (or a genuine remote miss) returns an error and we build.
 	if outputs, err := e.loadManifest(identity); err == nil {
-		l.Info("cache hit: %s (id=%s)", n.artifact, identity.Short())
+		l.Info("cache hit: %s (id=%s)", n.artifact.Key(), identity.Short())
 		e.graph.mu.Lock()
 		n.outputs = outputs
 		e.graph.mu.Unlock()
@@ -353,10 +353,10 @@ func (e *Engine) buildNode(ctx context.Context, n *node) BuildResult {
 	// the graph says must already exist was not published — a build-ordering
 	// error, surfaced loudly rather than silently rebuilt.
 	if e.noRecurse && n.artifact.Key() != e.target {
-		return fail(fmt.Errorf("required cache input missing (no-recurse): %s (id=%s)", n.artifact, identity.Short()))
+		return fail(fmt.Errorf("required cache input missing (no-recurse): %s (id=%s)", n.artifact.Key(), identity.Short()))
 	}
 
-	l.Info("building: %s (id=%s)", n.artifact, identity.Short())
+	l.Info("building: %s (id=%s)", n.artifact.Key(), identity.Short())
 
 	resolvedInputs, err := e.resolveInputs(n)
 	if err != nil {
@@ -378,7 +378,7 @@ func (e *Engine) buildNode(ctx context.Context, n *node) BuildResult {
 		return fail(fmt.Errorf("store manifest: %w", err))
 	}
 
-	l.Info("complete: %s (%d outputs)", n.artifact, len(outputs))
+	l.Info("complete: %s (%d outputs)", n.artifact.Key(), len(outputs))
 
 	e.graph.mu.Lock()
 	n.outputs = outputs

@@ -172,7 +172,7 @@ func TestEngineBuildOrder(t *testing.T) {
 
 	for _, r := range results {
 		if r.Err != nil {
-			t.Fatalf("build error for %s: %v", r.Artifact, r.Err)
+			t.Fatalf("build error for %s: %v", r.Artifact.Key(), r.Err)
 		}
 	}
 
@@ -320,7 +320,7 @@ func TestEngineNoRecurse(t *testing.T) {
 
 	for _, r := range results {
 		if r.Err != nil {
-			t.Fatalf("build error for %s: %v", r.Artifact, r.Err)
+			t.Fatalf("build error for %s: %v", r.Artifact.Key(), r.Err)
 		}
 	}
 	if !builtA {
@@ -399,7 +399,7 @@ func TestEngineParallel(t *testing.T) {
 	}
 	for _, r := range results {
 		if r.Err != nil {
-			t.Fatalf("unexpected error for %s: %v", r.Artifact, r.Err)
+			t.Fatalf("unexpected error for %s: %v", r.Artifact.Key(), r.Err)
 		}
 	}
 }
@@ -491,7 +491,7 @@ func TestDiscoverEngineRun(t *testing.T) {
 
 	for _, r := range results {
 		if r.Err != nil {
-			t.Fatalf("build error for %s: %v", r.Artifact, r.Err)
+			t.Fatalf("build error for %s: %v", r.Artifact.Key(), r.Err)
 		}
 	}
 
@@ -622,7 +622,7 @@ func TestInputResolution(t *testing.T) {
 
 	for _, r := range results {
 		if r.Err != nil {
-			t.Fatalf("build error for %s: %v", r.Artifact, r.Err)
+			t.Fatalf("build error for %s: %v", r.Artifact.Key(), r.Err)
 		}
 	}
 }
@@ -726,7 +726,7 @@ func TestIncludesCycleAllowed(t *testing.T) {
 	}
 	for _, r := range results {
 		if r.Err != nil {
-			t.Fatalf("build error for %s: %v", r.Artifact, r.Err)
+			t.Fatalf("build error for %s: %v", r.Artifact.Key(), r.Err)
 		}
 	}
 	if !a.built || !b.built {

@@ -74,7 +74,7 @@ func TestImageBuildE2E(t *testing.T) {
 	}
 	for _, r := range results {
 		if r.Err != nil {
-			t.Fatalf("%s failed: %v", r.Artifact, r.Err)
+			t.Fatalf("%s failed: %v", r.Artifact.Key(), r.Err)
 		}
 	}
 

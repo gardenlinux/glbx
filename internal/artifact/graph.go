@@ -62,7 +62,7 @@ func (g *Graph) Build() error {
 		for _, inc := range n.artifact.Includes() {
 			incNode, ok := g.nodeMap[inc.Key()]
 			if !ok {
-				return fmt.Errorf("artifact %s includes %s which is not in the graph", n.artifact, inc)
+				return fmt.Errorf("artifact %s includes %s which is not in the graph", n.artifact.Key(), inc.Key())
 			}
 			n.includes = append(n.includes, incNode)
 		}
@@ -90,7 +90,7 @@ func (g *Graph) Build() error {
 		for _, dep := range n.artifact.Depends() {
 			depNode, ok := g.nodeMap[dep.Key()]
 			if !ok {
-				return fmt.Errorf("artifact %s depends on %s which is not in the graph", n.artifact, dep)
+				return fmt.Errorf("artifact %s depends on %s which is not in the graph", n.artifact.Key(), dep.Key())
 			}
 			addEdge(depNode)
 		}

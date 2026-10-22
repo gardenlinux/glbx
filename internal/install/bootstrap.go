@@ -91,7 +91,7 @@ func BootstrapResolved(ctx context.Context, mountNS *container.MountNS, store *o
 			continue
 		}
 		blobPath, err := store.Blobs.Path(hash)
-		if err != nil || !store.Blobs.Has(hash) {
+		if err != nil {
 			l.Warn("skipping %s: blob not in store", pkg.Name)
 			continue
 		}

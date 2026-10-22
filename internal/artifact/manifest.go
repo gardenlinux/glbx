@@ -72,11 +72,11 @@ func ResolveOutputRefs(a Artifact, store *objstore.Store) (objstore.Hash, []objs
 	}
 	manifestHash, err := store.Map.Get(identity)
 	if err != nil {
-		return objstore.Hash{}, nil, fmt.Errorf("%s not built: %w", a, err)
+		return objstore.Hash{}, nil, fmt.Errorf("%s not built: %w", a.Key(), err)
 	}
 	outputs, err := parseManifestBlob(store, manifestHash)
 	if err != nil {
-		return objstore.Hash{}, nil, fmt.Errorf("parse manifest for %s: %w", a, err)
+		return objstore.Hash{}, nil, fmt.Errorf("parse manifest for %s: %w", a.Key(), err)
 	}
 	leaves := make([]objstore.Hash, 0, len(outputs))
 	for _, o := range outputs {

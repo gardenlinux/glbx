@@ -49,7 +49,7 @@ func setupLocalRepoInMountNS(mountNS *container.MountNS, store *objstore.Store, 
 			continue
 		}
 		blobPath, err := store.Blobs.Path(hash)
-		if err != nil || !store.Blobs.Has(hash) {
+		if err != nil {
 			continue
 		}
 		debName := fmt.Sprintf("%s_%s_%s.deb", pkg.Name, pkg.Version, pkg.Architecture)

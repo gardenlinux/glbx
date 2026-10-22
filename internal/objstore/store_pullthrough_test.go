@@ -127,6 +127,9 @@ func TestStore_NilRemote_IsPureLocal(t *testing.T) {
 	if _, err := s.Blobs.Open(absent); err == nil {
 		t.Error("Open(absent) with no remote should error")
 	}
+	if _, err := s.Blobs.Path(absent); err == nil {
+		t.Error("Path(absent) with no remote should error")
+	}
 	if _, err := s.Map.Get(absent); err == nil {
 		t.Error("Map.Get(absent) with no remote should error")
 	}
@@ -137,6 +140,9 @@ func TestStore_EmptyRemote_BehavesLikeLocal(t *testing.T) {
 	absent := MustHash("eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee")
 	if s.Blobs.Has(absent) {
 		t.Error("empty remote should supply nothing")
+	}
+	if _, err := s.Blobs.Path(absent); err == nil {
+		t.Error("Path(absent) with empty remote should error")
 	}
 	if _, err := s.Map.Get(absent); err == nil {
 		t.Error("Map.Get with empty remote should report not-found")

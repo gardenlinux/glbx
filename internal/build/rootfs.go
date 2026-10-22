@@ -368,7 +368,7 @@ func (r *Rootfs) extractLayers(ctx context.Context, mountNS *container.MountNS, 
 	l.Info("extracting Layer 0 (local packages)")
 	for _, lp := range installPkgs {
 		blobPath, err := store.Blobs.Path(lp.debHash)
-		if err != nil || !store.Blobs.Has(lp.debHash) {
+		if err != nil {
 			return fmt.Errorf("local deb blob %s (%s) not in store", lp.debHash, lp.name)
 		}
 		if err := container.Run(mountNS, &container.ExecRequest{
@@ -390,7 +390,7 @@ func (r *Rootfs) extractLayers(ctx context.Context, mountNS *container.MountNS, 
 			continue
 		}
 		blobPath, err := store.Blobs.Path(hash)
-		if err != nil || !store.Blobs.Has(hash) {
+		if err != nil {
 			continue
 		}
 		if err := container.Run(mountNS, &container.ExecRequest{
@@ -500,7 +500,7 @@ func (r *Rootfs) setupRootfsRepo(mountNS *container.MountNS, store *objstore.Sto
 
 	for _, lp := range localPkgs {
 		blobPath, err := store.Blobs.Path(lp.debHash)
-		if err != nil || !store.Blobs.Has(lp.debHash) {
+		if err != nil {
 			continue
 		}
 
@@ -508,7 +508,7 @@ func (r *Rootfs) setupRootfsRepo(mountNS *container.MountNS, store *objstore.Sto
 		controlHash, hasControl := inputs[controlKey]
 
 		var pkg *index.Package
-		if hasControl && store.Blobs.Has(controlHash) {
+		if hasControl {
 			if cp, err := store.Blobs.Path(controlHash); err == nil {
 				f, err := os.Open(cp)
 				if err == nil {
