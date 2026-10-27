@@ -21,6 +21,9 @@ func cmdBuild(args []string) error {
 	if len(args) >= 1 && args[0] == "--view-logs" {
 		return cmdBuildViewLogs(args[1:])
 	}
+	if len(args) >= 1 && args[0] == "--check-reproducible" {
+		return cmdBuildCheckReproducible(args[1:])
+	}
 
 	defaultJobs := int(math.Sqrt(float64(runtime.NumCPU())))
 
@@ -36,6 +39,10 @@ func cmdBuild(args []string) error {
 	target := fs.String("target", "", "build only the node with this Key (e.g. rootfs:amd64); other nodes must resolve from cache")
 	noRecurse := fs.Bool("no-recurse", false, "require every non-target node to resolve from cache; a miss is a hard error")
 	stream := fs.Bool("stream", false, "forward the target's logs live to the console instead of the task UI (requires --target and --no-recurse)")
+	// --check-reproducible and --view-logs are modes dispatched above, before this
+	// flagset parses; they are registered here only so `build --help` lists them.
+	fs.Bool("check-reproducible", false, "rebuild already-built targets and check each reproduces its cached output; writes a JSON report to --report (honors --target, --jobs)")
+	fs.Bool("view-logs", false, "review stored build logs instead of building; see --view-logs --help")
 	fs.Parse(args)
 
 	if *jobs <= 0 {
@@ -193,13 +200,15 @@ func cmdBuild(args []string) error {
 	return nil
 }
 
-// cmdBuildViewLogs renders stored build logs. Without --run it works from the
-// current configuration tree: each node's state comes from whether its output
-// manifest exists (built → green, log-but-no-manifest → failed, neither →
+// cmdBuildViewLogs renders stored build logs. Without --run or --report it works
+// from the current configuration tree: each node's state comes from whether its
+// output manifest exists (built → green, log-but-no-manifest → failed, neither →
 // pending) and its log is loaded from the cache by identity. With --run <id> the
-// node list, states, and logs all come from a recorded run instead. A positional
-// <target> prints that one node's log and exits; --engine-logs (only with --run)
-// prints the run's engine narrative.
+// node list, states, and logs all come from a recorded run instead; with --report
+// <file> they come from a reproducibility report (match → green, mismatch or
+// error → red), its per-node log loaded by the blob hash the report records. A
+// positional <target> prints that one node's log and exits; --engine-logs (only
+// with --run) prints the run's engine narrative.
 func cmdBuildViewLogs(args []string) error {
 	fs := flag.NewFlagSet("build --view-logs", flag.ExitOnError)
 	arch := fs.String("arch", buildcfg.HostArch(), "target architecture")
@@ -207,6 +216,7 @@ func cmdBuildViewLogs(args []string) error {
 	confDir := fs.String("conf-dir", "", "configuration directory")
 	stubPath := fs.String("stub", "", "path to exec_env_stub binary")
 	runID := fs.String("run", "", "view logs recorded under this build run id")
+	reportPath := fs.String("report", "", "view logs recorded in this reproducibility report (from build --check-reproducible)")
 	engineLogs := fs.Bool("engine-logs", false, "print the run's engine scheduling log (requires --run)")
 	fs.Parse(args)
 
@@ -215,6 +225,10 @@ func cmdBuildViewLogs(args []string) error {
 		target = rest[0]
 	} else if len(rest) > 1 {
 		return fmt.Errorf("--view-logs takes at most one target name")
+	}
+
+	if *runID != "" && *reportPath != "" {
+		return fmt.Errorf("--run and --report are mutually exclusive")
 	}
 
 	store, err := openStore(*cacheDir)
@@ -226,6 +240,9 @@ func cmdBuildViewLogs(args []string) error {
 		return fmt.Errorf("--engine-logs requires --run")
 	}
 
+	if *reportPath != "" {
+		return viewReportLogs(store, *reportPath, target)
+	}
 	if *runID != "" {
 		return viewRunLogs(store, *runID, target, *engineLogs)
 	}
@@ -331,6 +348,45 @@ func viewRunLogs(store *objstore.Store, runID, target string, engineLogs bool) e
 	}
 
 	tracker := artifact.TrackerFromRun(store, rec)
+	return showLogOverview(tracker)
+}
+
+// viewReportLogs renders logs from a reproducibility report. With a target it
+// prints that node's log; otherwise it shows the interactive overview over the
+// report's nodes, green for a reproduced node and red for a mismatch or rebuild
+// failure — the same view the check produced live.
+func viewReportLogs(store *objstore.Store, reportPath, target string) error {
+	rep, err := loadReproReport(reportPath)
+	if err != nil {
+		return err
+	}
+
+	if target != "" {
+		for _, n := range rep.Nodes {
+			if n.Key != target {
+				continue
+			}
+			if n.Log == "" {
+				return fmt.Errorf("report %s recorded no log for %s", reportPath, target)
+			}
+			h, err := objstore.NewHash(n.Log)
+			if err != nil {
+				return fmt.Errorf("node %s: invalid log hash %q: %w", target, n.Log, err)
+			}
+			buf := log.NewBufferTarget()
+			if err := artifact.LoadLogBlob(store, h, buf); err != nil {
+				return fmt.Errorf("load log for %s: %w", target, err)
+			}
+			log.PrintBuffer(buf)
+			return nil
+		}
+		return fmt.Errorf("report %s has no node %q", reportPath, target)
+	}
+
+	tracker, err := trackerFromReport(store, rep)
+	if err != nil {
+		return err
+	}
 	return showLogOverview(tracker)
 }
 

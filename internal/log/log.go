@@ -79,6 +79,7 @@ const (
 	InstallCheck
 	Chroot
 	Exec
+	Reprod
 )
 
 func (c Component) String() string {
@@ -111,6 +112,8 @@ func (c Component) String() string {
 		return "chroot"
 	case Exec:
 		return "exec"
+	case Reprod:
+		return "reprod"
 	default:
 		return "unknown"
 	}
@@ -131,6 +134,7 @@ var componentByName = map[string]Component{
 	"install-check": InstallCheck,
 	"chroot":        Chroot,
 	"exec":          Exec,
+	"reprod":        Reprod,
 }
 
 func (c Component) MarshalJSON() ([]byte, error) {

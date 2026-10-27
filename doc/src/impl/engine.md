@@ -47,3 +47,27 @@ reason surfaces even though that buffer is otherwise reachable only on request.
 
 A mock artifact drives the whole traversal, cache, and scheduler in tests,
 proving the engine is indifferent to what an artifact builds.
+
+## Reproducibility checking
+
+A reproducibility check rebuilds already-built targets and compares each
+rebuilt output against the one the cache holds. It does not use the dependency
+scheduler: the run is flat and bounded by the same worker count, with every
+target rebuilt independently. Each target's inputs are resolved up front from
+its dependencies' *original* cached output manifests — never from a freshly
+rebuilt one — so a non-reproducible dependency cannot cascade into a spurious
+mismatch on its dependents, and no node ever waits on another. A target whose
+output manifest is not already in the store is a hard error: the check verifies
+an existing build, it does not create one.
+
+Reproducibility is judged by the output-manifest hash. Because the manifest is
+canonically ordered (its entries sorted by name), a byte-reproducible build
+whose outputs are identical yields an identical manifest hash regardless of the
+order a producer emitted them in; a differing hash means the outputs themselves
+differ. Each rebuild's log, the reproduced manifest, and any differing output
+blobs are stored as blobs with **no** map entry of any kind, so a check never
+perturbs what the normal build and log-review paths resolve. The outcomes are
+returned to the caller, which both drives a live red/green UI and writes a JSON
+report pairing each artifact's original and reproduced manifest hash and
+recording its log blob's hash — the only reference to a reproducibility log,
+since nothing in the store's map points at it.

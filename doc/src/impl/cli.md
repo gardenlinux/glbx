@@ -76,7 +76,25 @@ A hand-rolled subcommand dispatch over `os.Args[1]`, each command owning a
   past run stays viewable even after a rebuild; `--run <id> <target>` prints one
   node's recorded log, and `--run <id> --engine-logs` prints that run's engine
   scheduling narrative (the only way to surface it — it never appears in the node
-  UI).
+  UI). `--report <file>` draws the node list, states, and logs from a
+  reproducibility report instead of a run: a reproduced node is green, a mismatch
+  or rebuild failure is red, and each node's log loads by the blob hash the report
+  records; `--report <file> <target>` prints one node's reproducibility log.
+- `build --check-reproducible` — rebuild already-built targets and check that each
+  reproduces its cached output. With `--target <Key>` it checks one node;
+  otherwise it checks every node a whole-tree build would build. The run is flat
+  and bounded by `--jobs`: every target rebuilds in parallel with no build-order
+  edges, each taking its inputs from its dependencies' *original* cached outputs
+  rather than a freshly rebuilt one, so a non-reproducible dependency never
+  cascades into spurious mismatches downstream. A target that is not already built
+  is a hard error. Reproducibility is judged by the output-manifest hash: a
+  rebuild whose manifest matches the cached one is green, a mismatch or a rebuild
+  failure is red, and the command exits non-zero if any target does not reproduce.
+  The run writes only blobs and no map entries — differing output blobs, the
+  reproduced manifest blob, and each rebuild's log — so it never perturbs what the
+  normal build and `--view-logs` paths resolve. A JSON report (`--report <file>`,
+  required) pairs each artifact's original and reproduced manifest hash and
+  records the hash of its log blob, which is the only reference to that log.
 - `graph` — render the dependency graph as Mermaid (default), a deterministic
   machine-readable node/edge export with `--format=json`, or a Gantt chart of a
   recorded build run with `--gantt <id>`. Each JSON node carries its `key` (the
