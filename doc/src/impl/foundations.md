@@ -13,7 +13,11 @@ so the encoding is unambiguous and order-significant.
 A local store is a directory of content-addressed `blobs/` and an
 identity→manifest `map/`, both sharded by the first two hex characters of the
 key. Blobs are written atomically (temp file, hash while writing, rename into
-place). The same `BlobStore`/`MapStore` interfaces are implemented three ways: a
+place). A manifest — the blob a built identity maps to — lists an artifact's
+named outputs as `<hash> <name>` lines, canonically ordered by name, so the same
+set of outputs always serializes to identical bytes regardless of the order a
+producer assembled them in and a manifest's hash is a function of its contents
+alone. The same `BlobStore`/`MapStore` interfaces are implemented three ways: a
 local filesystem store, an OCI-registry store (blobs and map entries served over
 the distribution API; writes, paths, and sweeps are refused), and a pull-through
 store composing a local with a remote so that on a local miss it fetches from the

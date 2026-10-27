@@ -616,12 +616,15 @@ func TestResolveOutputs(t *testing.T) {
 	if len(outputs) != 2 {
 		t.Fatalf("expected 2 outputs, got %d", len(outputs))
 	}
-	if outputs[0].Name != "rootfs.tar.gz" || outputs[1].Name != "manifest.json" {
+	// Manifests are canonically sorted by Name, independent of the order the
+	// artifact emitted them, so the entries come back in ascending-name order.
+	if outputs[0].Name != "manifest.json" || outputs[1].Name != "rootfs.tar.gz" {
 		t.Fatalf("unexpected output names: %+v", outputs)
 	}
 
 	// The output hash resolves to an on-disk blob path.
-	path, err := store.Blobs.Path(outputs[0].Hash)
+	byName := map[string]Output{outputs[0].Name: outputs[0], outputs[1].Name: outputs[1]}
+	path, err := store.Blobs.Path(byName["rootfs.tar.gz"].Hash)
 	if err != nil {
 		t.Fatalf("resolve path: %v", err)
 	}

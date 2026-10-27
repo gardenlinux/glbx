@@ -34,8 +34,10 @@ store meet.
   the pinned image-tooling hashes. Its build action narrows the runtime closure
   to the shipping set, stages the three-layer overlay (payload / throwaway
   configuration tooling / mutations), runs dpkg configuration against the merged
-  view, composes the final view from payload and mutations only, and serializes
-  the tree as a deterministic `tar.gz`.
+  view, then — before unmounting, so the removals are recorded in the packed
+  layer — drops the staging area and empties `/var/log`, whose dpkg traces vary
+  run to run. It composes the final view from payload and mutations only and
+  serializes the tree as a deterministic `tar.gz`.
 
 `PackageSet` scans the working tree and resolves `<source>:<binary>` references;
 `BuildGraph` turns an image's package list into a discovered graph.

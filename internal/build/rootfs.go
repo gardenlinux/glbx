@@ -23,7 +23,7 @@ import (
 // entries:
 //
 //	openssl rand -hex 16
-const rootfsSeed = "b74bd925ec0253726e0e9b28f31445fb"
+const rootfsSeed = "62bf3b3274afbda97d1100a6b81d7230"
 
 // Rootfs represents a root filesystem artifact assembled via the three-layer
 // overlay model:
@@ -486,8 +486,53 @@ func (r *Rootfs) runDpkg(ctx context.Context, mountNS *container.MountNS, store 
 		return fmt.Errorf("remove /pkgs staging dir: %w", err)
 	}
 
+	// Empty /var/log: dpkg --unpack/--configure append build-time traces
+	// (dpkg.log, alternatives.log) whose content varies run to run, defeating
+	// reproducibility. Clear its contents here, before the overlay is unmounted,
+	// so the removals are recorded in the packed layer. The directory itself is
+	// kept — packages expect it to exist.
+	if err := removeDirContents(mountNS, paths.merged+"/var/log"); err != nil {
+		return fmt.Errorf("empty /var/log: %w", err)
+	}
+
 	if err := mountNS.Umount(paths.merged, syscall.MNT_DETACH); err != nil {
 		return fmt.Errorf("umount overlay: %w", err)
+	}
+	return nil
+}
+
+// removeDirContents recursively removes everything under dir, leaving dir itself
+// in place. It operates through the mount namespace so removals land in the
+// writable overlay layer; directory entries are read from the fd the namespace
+// returns. A missing dir is not an error.
+func removeDirContents(mountNS *container.MountNS, dir string) error {
+	f, err := mountNS.Open(dir, os.O_RDONLY, 0)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("open %s: %w", dir, err)
+	}
+	entries, err := f.ReadDir(-1)
+	f.Close()
+	if err != nil {
+		return fmt.Errorf("read %s: %w", dir, err)
+	}
+
+	for _, e := range entries {
+		path := dir + "/" + e.Name()
+		if e.IsDir() {
+			if err := removeDirContents(mountNS, path); err != nil {
+				return err
+			}
+			if err := mountNS.Rmdir(path); err != nil {
+				return fmt.Errorf("rmdir %s: %w", path, err)
+			}
+		} else {
+			if err := mountNS.Unlink(path); err != nil {
+				return fmt.Errorf("unlink %s: %w", path, err)
+			}
+		}
 	}
 	return nil
 }
