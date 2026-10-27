@@ -30,6 +30,8 @@ func cmdBuild(args []string) error {
 	confDir := fs.String("conf-dir", "", "configuration directory")
 	stubPath := fs.String("stub", "", "path to exec_env_stub binary")
 	invalidate := fs.String("invalidate", "", "delete the map entry for the target with this Key (e.g. rootfs:amd64) and exit")
+	listOutputs := fs.String("list-outputs", "", "print the output names of the already-built target with this Key (e.g. rootfs:amd64) and exit")
+	outputPath := fs.String("output-path", "", "print the cache path of one named output of the already-built target with this Key; the output name is a positional argument")
 	target := fs.String("target", "", "build only the node with this Key (e.g. rootfs:amd64); other nodes must resolve from cache")
 	noRecurse := fs.Bool("no-recurse", false, "require every non-target node to resolve from cache; a miss is a hard error")
 	stream := fs.Bool("stream", false, "forward the target's logs live to the console instead of the task UI (requires --target and --no-recurse)")
@@ -84,6 +86,47 @@ func cmdBuild(args []string) error {
 		}
 		l.Info("invalidated %s (identity %s)", *invalidate, identity)
 		return nil
+	}
+
+	if *listOutputs != "" {
+		a := graphResult.Graph.Find(*listOutputs)
+		if a == nil {
+			return fmt.Errorf("no artifact with Key %q in graph", *listOutputs)
+		}
+		outputs, err := artifact.ResolveOutputs(a, store)
+		if err != nil {
+			return err
+		}
+		for _, o := range outputs {
+			fmt.Println(o.Name)
+		}
+		return nil
+	}
+
+	if *outputPath != "" {
+		if len(fs.Args()) != 1 {
+			return fmt.Errorf("--output-path requires exactly one output name as a positional argument")
+		}
+		name := fs.Args()[0]
+		a := graphResult.Graph.Find(*outputPath)
+		if a == nil {
+			return fmt.Errorf("no artifact with Key %q in graph", *outputPath)
+		}
+		outputs, err := artifact.ResolveOutputs(a, store)
+		if err != nil {
+			return err
+		}
+		for _, o := range outputs {
+			if o.Name == name {
+				path, err := store.Blobs.Path(o.Hash)
+				if err != nil {
+					return fmt.Errorf("resolve path for output %q of %s: %w", name, *outputPath, err)
+				}
+				fmt.Println(path)
+				return nil
+			}
+		}
+		return fmt.Errorf("%s has no output named %q", *outputPath, name)
 	}
 
 	l.Info("graph: %d nodes", graphResult.Graph.Len())

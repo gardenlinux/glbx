@@ -571,6 +571,65 @@ func TestManifestRoundTrip(t *testing.T) {
 	}
 }
 
+func TestResolveOutputs(t *testing.T) {
+	dir := t.TempDir()
+	store, err := objstore.NewLocal(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	h1, err := store.Blobs.Store(strings.NewReader("rootfs bytes"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	h2, err := store.Blobs.Store(strings.NewReader("manifest bytes"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	a := &mockArtifact{
+		name:     "producer",
+		identity: strings.Repeat("a1", 32),
+		buildFn: func(ctx BuildContext) ([]Output, error) {
+			return []Output{
+				{Name: "rootfs.tar.gz", Hash: h1},
+				{Name: "manifest.json", Hash: h2},
+			}, nil
+		},
+	}
+
+	// Not built yet: ResolveOutputs reports the miss.
+	if _, err := ResolveOutputs(a, store); err == nil {
+		t.Fatal("expected error for unbuilt artifact")
+	}
+
+	g := NewGraph()
+	g.Add(a)
+	if _, err := NewEngine(g, store, 1).Run(testCtx()); err != nil {
+		t.Fatal(err)
+	}
+
+	outputs, err := ResolveOutputs(a, store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(outputs) != 2 {
+		t.Fatalf("expected 2 outputs, got %d", len(outputs))
+	}
+	if outputs[0].Name != "rootfs.tar.gz" || outputs[1].Name != "manifest.json" {
+		t.Fatalf("unexpected output names: %+v", outputs)
+	}
+
+	// The output hash resolves to an on-disk blob path.
+	path, err := store.Blobs.Path(outputs[0].Hash)
+	if err != nil {
+		t.Fatalf("resolve path: %v", err)
+	}
+	if path == "" {
+		t.Fatal("empty blob path")
+	}
+}
+
 func TestInputResolution(t *testing.T) {
 	dir := t.TempDir()
 	store, err := objstore.NewLocal(dir)

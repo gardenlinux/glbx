@@ -61,6 +61,25 @@ func parseManifestBlob(store *objstore.Store, manifestHash objstore.Hash) ([]Out
 	return outputs, nil
 }
 
+// ResolveOutputs resolves a built artifact's identity → map → manifest blob and
+// returns its named outputs. It errors if the artifact has no map entry (not
+// built).
+func ResolveOutputs(a Artifact, store *objstore.Store) ([]Output, error) {
+	identity, err := a.Identity()
+	if err != nil {
+		return nil, fmt.Errorf("compute identity: %w", err)
+	}
+	manifestHash, err := store.Map.Get(identity)
+	if err != nil {
+		return nil, fmt.Errorf("%s not built: %w", a.Key(), err)
+	}
+	outputs, err := parseManifestBlob(store, manifestHash)
+	if err != nil {
+		return nil, fmt.Errorf("parse manifest for %s: %w", a.Key(), err)
+	}
+	return outputs, nil
+}
+
 // ResolveOutputRefs is the shared implementation of Artifact.OutputRefs. Given
 // an artifact's identity, it resolves identity → map → manifest blob and parses
 // the leaf references, returning the manifest blob hash and the leaf hashes.

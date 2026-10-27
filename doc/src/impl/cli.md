@@ -59,6 +59,10 @@ A hand-rolled subcommand dispatch over `os.Args[1]`, each command owning a
   node from cached inputs and its exit status reflects the target alone.
   `--stream` (with `--target` + `--no-recurse`) forwards the target's logs live
   to the console instead of the UI, for a legible build log on a CI runner.
+  `--list-outputs <Key>` prints the named outputs of an already-built target (one
+  name per line), and `--output-path <Key> <output>` prints the cache path of one
+  named output's blob — both resolve the Key to an identity, read its manifest,
+  and report the miss if the target is not built.
 - `graph` — render the dependency graph as Mermaid (default), a deterministic
   machine-readable node/edge export with `--format=json`, or a Gantt chart from
   a saved build-logs file. Each JSON node carries its `key` (the unique build
