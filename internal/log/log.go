@@ -201,6 +201,18 @@ func From(ctx context.Context, c Component) *Logger {
 	return &Logger{component: c, target: t}
 }
 
+// BufferFrom returns the BufferTarget carried on ctx, if the active target is
+// one. It lets code that routes logging through the context also reach the
+// underlying buffer directly — for example, to repopulate it from stored
+// records.
+func BufferFrom(ctx context.Context) (*BufferTarget, bool) {
+	if ctx == nil {
+		return nil, false
+	}
+	bt, ok := ctx.Value(ctxKey{}).(*BufferTarget)
+	return bt, ok
+}
+
 // Discard is a Target that drops every record.
 var Discard Target = discardTarget{}
 

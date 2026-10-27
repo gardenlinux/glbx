@@ -52,24 +52,38 @@ A hand-rolled subcommand dispatch over `os.Args[1]`, each command owning a
 - `lockfile` / `lockfile-rootfs` — generate a package's build-tooling lock, or
   the image configuration-tooling lock.
 - `build` — drive the engine over the discovered artifact graph, with the
-  interactive progress UI; `--invalidate` drops a target's cache entry,
-  `--view-logs` replays a saved run, and `--target <Key>` builds only that one
-  node — with `--no-recurse` the target's dependencies must resolve from the
-  cache (a missing dependency fails the target), so the pair builds exactly one
-  node from cached inputs and its exit status reflects the target alone.
-  `--stream` (with `--target` + `--no-recurse`) forwards the target's logs live
-  to the console instead of the UI, for a legible build log on a CI runner.
-  `--list-outputs <Key>` prints the named outputs of an already-built target (one
-  name per line), and `--output-path <Key> <output>` prints the cache path of one
-  named output's blob — both resolve the Key to an identity, read its manifest,
-  and report the miss if the target is not built.
+  interactive progress UI; `--invalidate` drops a target's cache entry, and
+  `--target <Key>` builds only that one node — with `--no-recurse` the target's
+  dependencies must resolve from the cache (a missing dependency fails the
+  target), so the pair builds exactly one node from cached inputs and its exit
+  status reflects the target alone. `--stream` (with `--target` + `--no-recurse`)
+  forwards the target's logs live to the console instead of the UI, for a legible
+  build log on a CI runner. `--list-outputs <Key>` prints the named outputs of an
+  already-built target (one name per line), and `--output-path <Key> <output>`
+  prints the cache path of one named output's blob — both resolve the Key to an
+  identity, read its manifest, and report the miss if the target is not built.
+  Every build stores each node's log as a cache blob keyed by the node's
+  identity, the engine's scheduling narrative as a per-run blob, and a run record
+  keyed by a random run id tying them together; it prints that id so the logs can
+  be reviewed afterward.
+- `build --view-logs` — review stored build logs, never a live build. With no
+  arguments it works from the current configuration tree: it shows the
+  interactive node list — a node with an output manifest is green, a node with a
+  stored log but no manifest (a failed attempt) is red, an unbuilt node is empty —
+  and prints a node's log on selection. A positional `<target>` prints just that
+  node's log and exits instead of opening the UI. `--run <id>` draws the node
+  list, states, and logs from a recorded run rather than the current tree, so a
+  past run stays viewable even after a rebuild; `--run <id> <target>` prints one
+  node's recorded log, and `--run <id> --engine-logs` prints that run's engine
+  scheduling narrative (the only way to surface it — it never appears in the node
+  UI).
 - `graph` — render the dependency graph as Mermaid (default), a deterministic
-  machine-readable node/edge export with `--format=json`, or a Gantt chart from
-  a saved build-logs file. Each JSON node carries its `key` (the unique build
-  handle, which edges reference) and a display-only `shortName` (the package name
-  or `rootfs`, no type prefix). `--check-built` adds to the JSON a per-node map,
-  keyed by `key`, of which nodes are already present in `$GLBX_REGISTRY`, so a
-  driver can skip them.
+  machine-readable node/edge export with `--format=json`, or a Gantt chart of a
+  recorded build run with `--gantt <id>`. Each JSON node carries its `key` (the
+  unique build handle, which edges reference) and a display-only `shortName` (the
+  package name or `rootfs`, no type prefix). `--check-built` adds to the JSON a
+  per-node map, keyed by `key`, of which nodes are already present in
+  `$GLBX_REGISTRY`, so a driver can skip them.
 - `cache` — object-store administration: `status`, keep-set `gc`, and raw
   `blobs` / `map` access.
 - `restore-cache` — populate the object store from the pins in the working tree,
@@ -77,9 +91,12 @@ A hand-rolled subcommand dispatch over `os.Args[1]`, each command owning a
   and verifying each against its pinned hash.
 - `publish` — mirror a checkout's locally-held content to an OCI registry:
   upload every recorded input and built-output blob the registry lacks and set a
-  `map` alias per built identity. `--target <Key>` scopes it to one built node's
-  manifest, output blobs, and alias. Reads the local store, writes the registry,
-  and is idempotent. The target registry is `--registry` or `$GLBX_REGISTRY`.
+  `map` alias per built identity. A built node's stored log is mirrored alongside
+  its outputs — only ever for a node whose manifest is also being published, so a
+  log is never pushed without the outputs it belongs to. `--target <Key>` scopes
+  it to one built node's manifest, output blobs, log, and aliases. Reads the
+  local store, writes the registry, and is idempotent. The target registry is
+  `--registry` or `$GLBX_REGISTRY`.
 - `resolve` — resolve package names against an index, with machine-parseable
   output on stdout and logs on stderr.
 - `status` — report the cache root and the discovered working tree.

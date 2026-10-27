@@ -11,7 +11,6 @@ import (
 	"github.com/gardenlinux/glbx/internal/buildcfg"
 	"github.com/gardenlinux/glbx/internal/log"
 	"github.com/gardenlinux/glbx/internal/objstore"
-	"github.com/gardenlinux/glbx/internal/taskui"
 )
 
 func cmdGraph(args []string) error {
@@ -23,11 +22,11 @@ func cmdGraph(args []string) error {
 	outputFile := fs.String("output", "", "output file (default: stdout)")
 	format := fs.String("format", "mermaid", "output format: mermaid or json")
 	checkBuilt := fs.Bool("check-built", false, "with --format=json, add a per-node built map (true = the node's identity is present in $GLBX_REGISTRY)")
-	gantt := fs.String("gantt", "", "render mermaid gantt chart from a build logs file (skips graph build)")
+	gantt := fs.String("gantt", "", "render a mermaid gantt chart of the build run with this id (skips graph build)")
 	fs.Parse(args)
 
 	if *gantt != "" {
-		return cmdGraphGantt(*gantt, *outputFile)
+		return cmdGraphGantt(*cacheDir, *gantt, *outputFile)
 	}
 
 	if *format != "mermaid" && *format != "json" {
@@ -174,17 +173,16 @@ func checkBuiltStatus(g *artifact.Graph) (map[string]bool, error) {
 	return status, nil
 }
 
-func cmdGraphGantt(logsPath, outputFile string) error {
-	f, err := os.Open(logsPath)
+func cmdGraphGantt(cacheDir, runID, outputFile string) error {
+	store, err := openStore(cacheDir)
 	if err != nil {
-		return fmt.Errorf("open %s: %w", logsPath, err)
+		return fmt.Errorf("open store: %w", err)
 	}
-	defer f.Close()
-
-	tracker, err := taskui.Deserialize(f)
+	rec, err := artifact.LoadRunRecord(store, runID)
 	if err != nil {
-		return fmt.Errorf("deserialize %s: %w", logsPath, err)
+		return err
 	}
+	tracker := artifact.TrackerFromRun(store, rec)
 
 	mermaid := tracker.Gantt()
 

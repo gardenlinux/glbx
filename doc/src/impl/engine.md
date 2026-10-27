@@ -26,11 +26,24 @@ inputs from the cache; a dependency the graph says must exist but that has not
 been published skips the target, so the outcome turns on the target's own result
 and unrelated nodes left unresolved do not count against it.
 
-The progress UI captures each node's logs into its own task buffer. A streaming
-mode reuses that same buffer and its log printer — the one the interactive view
-attaches when a task is entered — but without any UI: it forwards the single
-target's logs straight to the console for the whole run, so a non-interactive
-runner shows the build as it happens rather than a status summary after the fact.
+The progress UI captures each node's logs into its own task buffer, while the
+engine's own scheduling narrative — building, cache hit, complete — goes to a
+separate per-run buffer so that chatter is never folded into a node's log. A
+streaming mode reuses the per-node buffer and its log printer — the one the
+interactive view attaches when a task is entered — but without any UI: it
+forwards the single target's logs straight to the console for the whole run, so a
+non-interactive runner shows the build as it happens rather than a status summary
+after the fact.
+
+After the run each node's buffer is stored as a cache blob keyed by a sibling of
+the node's identity, so a later invocation over the same tree can replay the real
+build log — and on a cache hit the engine repopulates the node's buffer from that
+blob rather than a synthetic hit line. The per-run engine buffer is stored too,
+and a run record — keyed by a random run id, referencing every log by blob hash
+rather than by its map key — ties them together so a past run stays viewable even
+after a rebuild re-points a node's log entry. When a build fails, the engine
+buffer's failure lines are flushed to the console after the UI tears down, so the
+reason surfaces even though that buffer is otherwise reachable only on request.
 
 A mock artifact drives the whole traversal, cache, and scheduler in tests,
 proving the engine is indifferent to what an artifact builds.

@@ -42,14 +42,16 @@ one per kind of content, and they are the whole scheme:
   it is or what references it. Pushing a blob and reading one back are both pure
   content addressing: `blob/<hash>` is a mechanical function of the hash.
 
-- **`map/<id>`** — one per map entry. A map key is an artifact identity
-  ([identity.md](./identity.md)), itself a SHA-256 hex string whose every
-  character is a legal tag character. A map entry's value is the hash of a
-  manifest blob, which — being a blob — already has its `blob/<hash>` tag and
-  one-layer manifest. The map entry adds **a second tag, `map/<id>`, pointing at
-  that same manifest**. It introduces no new object: `map/<id>` and
-  `blob/<manifestHash>` resolve to the identical one-layer manifest; the map tag
-  is simply a by-identity name for the manifest-value blob.
+- **`map/<id>`** — one per map entry. A map key is a content-derived SHA-256 hex
+  string — an artifact identity ([identity.md](./identity.md)), or a sibling key
+  derived from one such as a node's build log — whose every character is a legal
+  tag character. A map entry's value is the hash of a manifest or log blob,
+  which — being a blob — already has its `blob/<hash>` tag and one-layer
+  manifest. The map entry adds **a second tag, `map/<id>`, pointing at that same
+  manifest**. It introduces no new object: `map/<id>` and `blob/<valueHash>`
+  resolve to the identical one-layer manifest; the map tag is simply a by-key
+  name for the value blob. A built node's log is published this way alongside its
+  outputs — never on its own — so a cold checkout can replay the log it pulls.
 
 So a blob is self-rooting under its content hash, and a map entry is one extra
 alias from an identity to a blob. Nothing is wrapped in anything larger than a

@@ -35,6 +35,14 @@ type Engine struct {
 	// stream forwards the target node's logs live to the console instead of
 	// driving the task UI. Only meaningful alongside a single target.
 	stream bool
+
+	// engineLog collects the engine's per-run scheduling narrative (building,
+	// cache hit, complete) and a copy of each failure, kept separate from the
+	// per-node log buffers so that chatter is never cached into a node's log
+	// blob. engineLogr is a logger bound to it. Both are set per run by
+	// RunWithUI and stay nil in the plain Run path, where engine lines drop.
+	engineLog  *log.BufferTarget
+	engineLogr *log.Logger
 }
 
 func NewEngine(g *Graph, store *objstore.Store, workers int) *Engine {
@@ -89,11 +97,11 @@ func (e *Engine) Run(ctx context.Context) ([]BuildResult, error) {
 // becomes a task shown in dependency order. Builds run with the configured worker
 // parallelism, and all logs are captured per-task for interactive inspection.
 //
-// logsOutput, if non-empty, names the path the JSON task-tracker snapshot will
-// be written to. Empty falls back to an os.CreateTemp file under the system
-// tempdir. The caller controls the path so it can persist alongside the build
-// (e.g. into a results-tagged commit).
-func (e *Engine) RunWithUI(ctx context.Context, logsOutput string) ([]BuildResult, error) {
+// Each node's log is stored as a cache blob keyed by its identity, the engine's
+// scheduling narrative is stored as a per-run blob, and both are tied together by
+// a run record keyed by a random run id. The id is printed so the logs can be
+// reviewed afterward with `glbx build --view-logs --run <id>`.
+func (e *Engine) RunWithUI(ctx context.Context) ([]BuildResult, error) {
 	if err := e.graph.Build(); err != nil {
 		return nil, err
 	}
@@ -109,6 +117,9 @@ func (e *Engine) RunWithUI(ctx context.Context, logsOutput string) ([]BuildResul
 		t := tracker.Add(a.Key())
 		taskMap[a.Key()] = t
 	}
+
+	e.engineLog = log.NewBufferTarget()
+	e.engineLogr = log.From(log.WithTarget(context.Background(), e.engineLog), log.Engine)
 
 	interactive := term.IsTerminal(int(os.Stdout.Fd())) && term.IsTerminal(int(os.Stderr.Fd()))
 	var overview *taskui.TaskOverview
@@ -196,34 +207,72 @@ func (e *Engine) RunWithUI(ctx context.Context, logsOutput string) ([]BuildResul
 		viewer.Stop()
 	}
 
-	// Streaming is the single-target mode: the target's own logs already went to
-	// the console, so the whole-graph status table and the UI snapshot (with its
-	// view-logs hint) are noise. Everything else prints the summary table.
-	if !e.stream {
-		fmt.Fprintf(os.Stderr, "\n")
-		tracker.PrintPlain()
-		f, ferr := openLogsOutput(logsOutput)
-		if ferr == nil {
-			if serErr := tracker.Serialize(f); serErr == nil {
-				f.Close()
-				total := len(tracker.Tasks())
-				fmt.Fprintf(os.Stderr, "\nCompleted %d tasks. Logs written to: %s. Investigate logs with:\n%s build --view-logs %s\n", total, f.Name(), os.Args[0], f.Name())
-			} else {
-				f.Close()
+	buildFailed := false
+	for i := range results {
+		if results[i].Err != nil {
+			buildFailed = true
+			break
+		}
+	}
+
+	// With the UI torn down, flush the engine buffer's failure lines to the
+	// console so a failed build reports why even though the engine buffer is
+	// never shown in the UI. Only ERROR records print; the scheduling chatter
+	// stays in the buffer, reachable via --view-logs --run <id> --engine-logs.
+	if buildFailed && e.engineLog != nil {
+		con := log.NewStderrConsoleTarget()
+		reader := e.engineLog.Reader()
+		for {
+			rec, rerr := reader.Read()
+			if rerr == log.ErrNoMore {
+				break
+			}
+			if rec.Level == log.Error {
+				con.Emit(rec)
 			}
 		}
+	}
+
+	// Persist every node's log, the engine log, and a run record tying them
+	// together, then point the user at the run id. Streaming prints only the
+	// one-line hint; everything else prints the status table too.
+	runID := newRunID()
+	if err := e.storeRun(runID, tracker); err != nil {
+		log.From(ctx, log.Engine).Warn("record build run: %v", err)
+	} else if e.stream {
+		fmt.Fprintf(os.Stderr, "\nInvestigate logs with:\n%s build --view-logs --run %s\n", os.Args[0], runID)
+	} else {
+		fmt.Fprintf(os.Stderr, "\n")
+		tracker.PrintPlain()
+		fmt.Fprintf(os.Stderr, "\nCompleted %d tasks. Investigate logs with:\n%s build --view-logs --run %s\n", len(tracker.Tasks()), os.Args[0], runID)
 	}
 
 	return results, err
 }
 
-// openLogsOutput opens the destination for the build-logs JSON snapshot. An
-// explicit path is created/truncated; an empty path falls back to a tempfile.
-func openLogsOutput(path string) (*os.File, error) {
-	if path == "" {
-		return os.CreateTemp("", "glbx-build-*.json")
+// storeRun writes each node's log blob (keyed by identity) and the per-run
+// engine-log blob, then a run record keyed by the run id whose per-node entries
+// point at the log blobs by hash. Nodes with no built identity contribute a
+// stateful entry without a log.
+func (e *Engine) storeRun(runID string, tracker *taskui.TaskTracker) error {
+	engineLogHash, err := storeLogBlob(e.store, e.engineLog)
+	if err != nil {
+		return fmt.Errorf("store engine log: %w", err)
 	}
-	return os.Create(path)
+
+	rec := &RunRecord{ID: runID, EngineLog: engineLogHash}
+	for _, t := range tracker.Tasks() {
+		rn := RunNode{Key: t.Name, State: t.State(), Start: t.Start(), End: t.End()}
+		if a := e.graph.Find(t.Name); a != nil {
+			if identity, ierr := a.Identity(); ierr == nil {
+				if h, serr := storeLog(e.store, identity, t.Log); serr == nil {
+					rn.Log = h
+				}
+			}
+		}
+		rec.Nodes = append(rec.Nodes, rn)
+	}
+	return storeRunRecord(e.store, rec)
 }
 
 // run is the shared scheduling loop. It builds the graph (idempotent), spins
@@ -323,11 +372,26 @@ func (e *Engine) run(ctx context.Context, hooks runHooks) ([]BuildResult, error)
 	return e.results, nil
 }
 
+// elog returns the logger for the per-run engine buffer, or a no-op logger when
+// no engine buffer is set (the plain Run path). It lets buildNode route the
+// scheduling narrative to the engine buffer without a nil check at each site.
+func (e *Engine) elog() *log.Logger {
+	if e.engineLogr != nil {
+		return e.engineLogr
+	}
+	return log.From(nil, log.Engine)
+}
+
 func (e *Engine) buildNode(ctx context.Context, n *node) BuildResult {
 	l := log.From(ctx, log.Engine)
+	eng := e.elog()
 
+	// FAILED lands in both the node buffer — where it is the artifact's own
+	// failure detail, shown when the node is selected — and the engine buffer,
+	// whose ERROR records are flushed to the console when the build fails.
 	fail := func(err error) BuildResult {
 		l.Error("FAILED: %s: %v", n.artifact.Key(), err)
+		eng.Error("FAILED: %s: %v", n.artifact.Key(), err)
 		return BuildResult{Artifact: n.artifact, Err: err}
 	}
 
@@ -341,7 +405,13 @@ func (e *Engine) buildNode(ctx context.Context, n *node) BuildResult {
 	// the manifest + leaves) rather than triggering a rebuild. A miss with no
 	// remote (or a genuine remote miss) returns an error and we build.
 	if outputs, err := e.loadManifest(identity); err == nil {
-		l.Info("cache hit: %s (id=%s)", n.artifact.Key(), identity.Short())
+		eng.Info("cache hit: %s (id=%s)", n.artifact.Key(), identity.Short())
+		// Repopulate the node buffer with the real build log recorded when the
+		// node was first built, rather than a synthetic cache-hit line. A miss
+		// (no stored log for this identity) leaves the buffer empty.
+		if buf, ok := log.BufferFrom(ctx); ok {
+			_ = loadLogInto(e.store, identity, buf)
+		}
 		e.graph.mu.Lock()
 		n.outputs = outputs
 		e.graph.mu.Unlock()
@@ -356,7 +426,7 @@ func (e *Engine) buildNode(ctx context.Context, n *node) BuildResult {
 		return fail(fmt.Errorf("required cache input missing (no-recurse): %s (id=%s)", n.artifact.Key(), identity.Short()))
 	}
 
-	l.Info("building: %s (id=%s)", n.artifact.Key(), identity.Short())
+	eng.Info("building: %s (id=%s)", n.artifact.Key(), identity.Short())
 
 	resolvedInputs, err := e.resolveInputs(n)
 	if err != nil {
@@ -378,7 +448,7 @@ func (e *Engine) buildNode(ctx context.Context, n *node) BuildResult {
 		return fail(fmt.Errorf("store manifest: %w", err))
 	}
 
-	l.Info("complete: %s (%d outputs)", n.artifact.Key(), len(outputs))
+	eng.Info("complete: %s (%d outputs)", n.artifact.Key(), len(outputs))
 
 	e.graph.mu.Lock()
 	n.outputs = outputs

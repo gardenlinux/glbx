@@ -6,6 +6,7 @@ package objstore
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"regexp"
 )
@@ -80,4 +81,29 @@ func (h Hash) Suffix() string {
 func HashBytes(b []byte) Hash {
 	d := sha256.Sum256(b)
 	return Hash{hex: hex.EncodeToString(d[:])}
+}
+
+// MarshalJSON encodes the hash as its hex string. The zero value encodes as the
+// empty string so an optional hash field round-trips with omitempty.
+func (h Hash) MarshalJSON() ([]byte, error) {
+	return json.Marshal(h.hex)
+}
+
+// UnmarshalJSON decodes a hex-string hash. The empty string decodes to the zero
+// value; any other value must be a valid 64-character hex digest.
+func (h *Hash) UnmarshalJSON(data []byte) error {
+	var s string
+	if err := json.Unmarshal(data, &s); err != nil {
+		return err
+	}
+	if s == "" {
+		*h = Hash{}
+		return nil
+	}
+	parsed, err := NewHash(s)
+	if err != nil {
+		return err
+	}
+	*h = parsed
+	return nil
 }

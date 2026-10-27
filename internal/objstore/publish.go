@@ -5,11 +5,12 @@ import (
 	"io"
 )
 
-// MapAlias is one artifact identity to publish as a map-<id> tag, paired with
-// the manifest-blob hash its value points at.
+// MapAlias is one map entry to publish as a map-<key> tag, paired with the blob
+// hash its value points at. Both identity→manifest and log-key→log-blob entries
+// are published this way.
 type MapAlias struct {
-	Identity     Hash
-	ManifestHash Hash
+	Key   Hash
+	Value Hash
 }
 
 // PublishResult summarizes a publish run.
@@ -62,22 +63,22 @@ func (p *Publisher) EnsureBlob(h Hash) (uploaded, missing bool, err error) {
 	return true, false, nil
 }
 
-// EnsureAlias sets the map-<id> tag if absent, pointing it at the byte-identical
-// one-layer manifest that wraps the manifest blob. The manifest blob must have
-// been ensured first; its bytes are read locally to size the layer descriptor.
+// EnsureAlias sets the map-<key> tag if absent, pointing it at the byte-identical
+// one-layer manifest that wraps the value blob. The value blob must have been
+// ensured first; its bytes are read locally to size the layer descriptor.
 func (p *Publisher) EnsureAlias(a MapAlias) (set bool, err error) {
-	exists, err := p.reg.tagExists(mapTag(a.Identity))
+	exists, err := p.reg.tagExists(mapTag(a.Key))
 	if err != nil {
-		return false, fmt.Errorf("check alias %s: %w", a.Identity, err)
+		return false, fmt.Errorf("check alias %s: %w", a.Key, err)
 	}
 	if exists {
 		return false, nil
 	}
-	data, err := p.readLocal(a.ManifestHash)
+	data, err := p.readLocal(a.Value)
 	if err != nil {
-		return false, fmt.Errorf("alias %s: manifest blob %s not local: %w", a.Identity, a.ManifestHash, err)
+		return false, fmt.Errorf("alias %s: value blob %s not local: %w", a.Key, a.Value, err)
 	}
-	if err := p.reg.aliasMap(a.Identity, a.ManifestHash, int64(len(data))); err != nil {
+	if err := p.reg.aliasMap(a.Key, a.Value, int64(len(data))); err != nil {
 		return false, err
 	}
 	return true, nil
@@ -133,7 +134,7 @@ func (p *Publisher) Publish(blobs []Hash, aliases []MapAlias, progress PublishPr
 			res.AliasesPresent++
 		}
 		if progress != nil {
-			progress(done, total, "alias", a.Identity.Short(), outcome)
+			progress(done, total, "alias", a.Key.Short(), outcome)
 		}
 	}
 	return res, nil

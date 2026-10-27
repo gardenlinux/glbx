@@ -121,6 +121,23 @@ func (tt *TaskTracker) Add(name string) *Task {
 	return t
 }
 
+// AddSnapshot appends a task in a fixed terminal state with an explicit run
+// window, for reconstructing a tracker from a recorded run rather than a live
+// build. The returned task's Log may be populated by the caller.
+func (tt *TaskTracker) AddSnapshot(name string, state TaskState, start, end time.Time) *Task {
+	t := &Task{
+		Name:  name,
+		state: state,
+		start: start,
+		end:   end,
+		Log:   log.NewBufferTarget(),
+	}
+	tt.mu.Lock()
+	tt.tasks = append(tt.tasks, t)
+	tt.mu.Unlock()
+	return t
+}
+
 func (tt *TaskTracker) Tasks() []*Task {
 	tt.mu.Lock()
 	defer tt.mu.Unlock()

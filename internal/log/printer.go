@@ -50,6 +50,15 @@ func (p *LogPrinter) Stop() {
 	<-p.done
 }
 
+// PrintBuffer drains buf to stdio once using the console formatting and returns
+// when the buffer is exhausted. It is the non-interactive, print-and-exit form
+// of a LogPrinter, for echoing a stored log without a live UI.
+func PrintBuffer(buf *BufferTarget) {
+	p := NewLogPrinter(buf)
+	p.Run()
+	p.Stop()
+}
+
 func (p *LogPrinter) loop() {
 	defer close(p.done)
 	for {

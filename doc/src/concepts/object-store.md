@@ -41,7 +41,11 @@ small:
   computes before building. The value under a key is the hash of a **manifest**
   blob — a small blob listing the artifact's named outputs, one `(blob hash,
   output name)` pair per line, exactly the manifest the artifact model
-  describes.
+  describes. The same map holds a few sibling entries derived the same way: a
+  node's build **log**, keyed by a hash folded from its identity, and a **build
+  run** record, keyed by a hash folded from a run id. Every key is a
+  content-derived hash drawn from one space, so these never collide; the identity
+  → manifest entry is simply the most common.
 
 A lookup is therefore two steps: resolve an identity through the map to a
 manifest blob, then read that blob to recover the named output blobs. Both steps

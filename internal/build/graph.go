@@ -180,7 +180,14 @@ func (gr *GraphResult) BuiltOutputs(store *objstore.Store) (blobs []objstore.Has
 		}
 		blobs = append(blobs, manifest)
 		blobs = append(blobs, leaves...)
-		aliases = append(aliases, objstore.MapAlias{Identity: identity, ManifestHash: manifest})
+		aliases = append(aliases, objstore.MapAlias{Key: identity, Value: manifest})
+		// A built node may also have a recorded log; mirror it so a cold
+		// checkout can view logs. Gating on the node being built ensures a log
+		// is never published without its outputs.
+		if logAlias, ok := artifact.LogAlias(store, a); ok {
+			blobs = append(blobs, logAlias.Value)
+			aliases = append(aliases, logAlias)
+		}
 	}
 	return blobs, aliases
 }
@@ -203,7 +210,11 @@ func (gr *GraphResult) BuiltOutputsFor(store *objstore.Store, key string) (blobs
 	}
 	blobs = append(blobs, manifest)
 	blobs = append(blobs, leaves...)
-	aliases = append(aliases, objstore.MapAlias{Identity: identity, ManifestHash: manifest})
+	aliases = append(aliases, objstore.MapAlias{Key: identity, Value: manifest})
+	if logAlias, ok := artifact.LogAlias(store, a); ok {
+		blobs = append(blobs, logAlias.Value)
+		aliases = append(aliases, logAlias)
+	}
 	return blobs, aliases, nil
 }
 
