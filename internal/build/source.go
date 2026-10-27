@@ -18,9 +18,14 @@ import (
 	"github.com/gardenlinux/glbx/internal/stream"
 )
 
-// identityScheme labels the identity-fold construction. It is the first element
-// of every artifact identity, so a change to the scheme changes every identity.
-const identityScheme = "glbx-identity-v1"
+// sourceSeed is the per-type identity seed for source builds. It is folded into
+// every source-build identity after the global seed, so regenerating it
+// invalidates exactly the source builds and leaves other types untouched.
+// Regenerate when a change makes source-build derivation incompatible with
+// prior cache entries:
+//
+//	openssl rand -hex 16
+const sourceSeed = "2ddbb5227edeb4f7a1895e5fa18fd47b"
 
 // localVersionSuffix separates a package's base version from the content-derived
 // local-build suffix (base+gl~<srcHash[:8]>).
@@ -178,7 +183,7 @@ func (s *DebianPkgBuild) Identity() (objstore.Hash, error) {
 		return objstore.Hash{}, fmt.Errorf("hash package directory: %w", err)
 	}
 
-	parts := []string{identityScheme, dirHash, s.Arch}
+	parts := []string{artifact.IDSeed(), sourceSeed, dirHash, s.Arch}
 	for _, dep := range s.DepArtifacts {
 		id, err := dep.Identity()
 		if err != nil {

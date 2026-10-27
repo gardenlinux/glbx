@@ -17,6 +17,14 @@ import (
 	"github.com/gardenlinux/glbx/internal/objstore"
 )
 
+// rootfsSeed is the per-type identity seed for the rootfs, folded in after the
+// global seed so regenerating it invalidates exactly the rootfs identities.
+// Regenerate when a change makes rootfs derivation incompatible with prior cache
+// entries:
+//
+//	openssl rand -hex 16
+const rootfsSeed = "b74bd925ec0253726e0e9b28f31445fb"
+
 // Rootfs represents a root filesystem artifact assembled via the three-layer
 // overlay model:
 //   - Layer 0: locally-built packages (raw extracted)
@@ -136,7 +144,7 @@ func (r *Rootfs) Identity() (objstore.Hash, error) {
 		return r.identity, nil
 	}
 
-	parts := []string{identityScheme, "rootfs", r.Arch}
+	parts := []string{artifact.IDSeed(), rootfsSeed, r.Arch}
 
 	// Fold the content hash of every pinned image-tooling file.
 	if tools, err := r.loadImageToolingPins(); err == nil {

@@ -12,6 +12,14 @@ import (
 	"github.com/gardenlinux/glbx/internal/objstore"
 )
 
+// binarySeed is the per-type identity seed for binary packages, folded in after
+// the global seed so regenerating it invalidates exactly the binary packages.
+// Regenerate when a change makes binary-package derivation incompatible with
+// prior cache entries:
+//
+//	openssl rand -hex 16
+const binarySeed = "fc5e09e778b6e25c7b2e2644f29589cc"
+
 // debianBinaryPkg is the per-binary artifact. It performs no compilation: it
 // selects one named binary from its parent source build's outputs and re-emits
 // it as the thing downstream artifacts depend on. The validation that every
@@ -121,7 +129,7 @@ func (b *debianBinaryPkg) Identity() (objstore.Hash, error) {
 	}
 	b.resolveExtraDeps()
 
-	parts := []string{identityScheme, "binary-pkg", b.name}
+	parts := []string{artifact.IDSeed(), binarySeed, b.name}
 
 	srcID, err := b.sourceBuild.Identity()
 	if err != nil {

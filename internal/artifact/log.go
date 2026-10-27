@@ -8,16 +8,12 @@ import (
 	"github.com/gardenlinux/glbx/internal/objstore"
 )
 
-// logScheme tags the map key that stores a node's build log. It is folded into
-// the key alongside the artifact identity so the log entry is a stable sibling
-// of the identity→manifest entry without colliding with any artifact identity.
-const logScheme = "glbx-log-v1"
-
 // logKey is the map key under which a node's build-log blob is recorded. It is
 // derived from the artifact identity so the log for a built node is reachable
-// from the identity alone, the same way its output manifest is.
+// from the identity alone, the same way its output manifest is. The identity
+// already carries the scheme seeds, so the key needs no version of its own.
 func logKey(identity objstore.Hash) objstore.Hash {
-	return objstore.ConcatHash(identity.String(), logScheme)
+	return objstore.ConcatHash(identity.String(), "logs")
 }
 
 // storeLog serializes a node's log buffer to a blob and maps logKey(identity) to

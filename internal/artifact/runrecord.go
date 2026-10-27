@@ -24,11 +24,6 @@ func newRunID() string {
 	return hex.EncodeToString(b[:])
 }
 
-// runScheme tags the map key that records a single build invocation. Folded
-// together with the run id, it yields a stable key that cannot collide with an
-// artifact identity or a log entry.
-const runScheme = "glbx-build-run"
-
 // RunNode is one node's entry in a run record: its graph key, the state the
 // build left it in, the window it ran in, and the hash of its log blob (zero
 // when no log was stored).
@@ -54,7 +49,7 @@ type RunRecord struct {
 // runKey is the map key under which a run record is stored, derived from the
 // run id.
 func runKey(id string) objstore.Hash {
-	return objstore.ConcatHash(id, runScheme)
+	return objstore.ConcatHash(id, "build-run")
 }
 
 // storeRunRecord serializes a run record to a blob and maps runKey(id) to it.

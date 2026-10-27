@@ -103,10 +103,17 @@ identity. The parts are exactly those the artifact model names as identity-
 bearing — its direct inputs and the identities of its Depends dependencies — and
 nothing else:
 
-1. A **version tag** for the identity scheme itself — a fixed label naming this
-   construction. It lets the scheme evolve later without old and new identities
-   ever colliding: change the rules, change the tag, and every identity changes
-   with it.
+1. Two **scheme seeds**, folded in first. A **global seed** names this
+   construction across the whole system; a **per-type seed** names the derivation
+   rules of this one artifact kind (source build, binary package, or rootfs).
+   Each is an arbitrary opaque string, hashed in with everything else — the value
+   carries no meaning beyond being fixed and distinct. Together they let the
+   scheme evolve without old and new identities ever colliding: changing the
+   global seed re-namespaces every identity at once (a full cache miss), while
+   changing one type's seed invalidates exactly that type and leaves the others
+   untouched — so a change to, say, how the rootfs is assembled need not discard
+   every built package. The global seed also has a runtime override, for working
+   in an independent cache namespace without editing the source.
 2. The **direct inputs**, the leaf non-artifact data the artifact is built from:
    its source-tree dirhash, the target architecture, and — depending on the kind
    of artifact — the selected binary name, the build profiles and options, and
@@ -125,10 +132,10 @@ nothing else:
 Each part is serialized so that no two distinct tuples can produce the same byte
 stream — fields are length-delimited or otherwise framed, never simply
 concatenated, so that moving a byte from the end of one field to the start of the
-next cannot go unnoticed. The label contributes nothing and neither do the
-Includes edges, exactly as the artifact model requires; feeding only the
-identity-bearing parts in is what makes two artifacts with identical such parts
-share an identity.
+next cannot go unnoticed. The scheme seeds contribute nothing that distinguishes
+one artifact from another, and neither do the Includes edges, exactly as the
+artifact model requires; feeding only the identity-bearing parts in is what makes
+two artifacts with identical such parts share an identity.
 
 Because every dependency enters as its *identity* — itself the fold of its own
 inputs and dependencies — the computation is recursive from the leaves up. An

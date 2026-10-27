@@ -2,9 +2,33 @@ package artifact
 
 import (
 	"context"
+	"os"
 
 	"github.com/gardenlinux/glbx/internal/objstore"
 )
+
+// idSeed is the global identity-scheme seed, folded as the first element of
+// every artifact identity. It namespaces the whole cache: changing it
+// invalidates every cache entry at once. It is an arbitrary string — the
+// 128-bit hex literal is just a conveniently unguessable value, not a format
+// requirement. Regenerate (and accept a full cache miss) only when the shape of
+// how identities are composed changes system-wide:
+//
+//	openssl rand -hex 16
+//
+// A per-artifact-type change does not touch this; each type carries its own
+// seed. $GLBX_ID_SEED_OVERRIDE replaces it at runtime to get an independent
+// cache namespace without editing the source.
+const idSeed = "6a92ce0bffa008c51c6fe87e0143664a"
+
+// IDSeed returns the global identity seed, honoring $GLBX_ID_SEED_OVERRIDE. It
+// is the first element every artifact type folds into its identity.
+func IDSeed() string {
+	if override := os.Getenv("GLBX_ID_SEED_OVERRIDE"); override != "" {
+		return override
+	}
+	return idSeed
+}
 
 // Output is a single named result produced by an artifact's Build().
 // The Name is an opaque identifier — could be a filename, a qualified name
