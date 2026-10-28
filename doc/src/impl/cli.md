@@ -5,26 +5,32 @@
 A hand-rolled subcommand dispatch over `os.Args[1]`, each command owning a
 `flag.FlagSet`:
 
-- `import <package>` — import a Debian source package into the working tree. By
-  default the import is recorded on the package's independent upstream lineage: a
-  first import is an orphan commit, each later import is parented on the previous
-  import, and the commit — carrying a fenced metadata block (`pkg`, `version`,
-  `auto_update`) in its message — is built entirely through git plumbing against
-  a throwaway index, so the working tree is never disturbed by the construction.
-  The command then replaces itself with `git merge` to bring the import into the
-  current branch, so a merge conflict (or clean merge) propagates verbatim as the
-  command's own output and exit status. When a prior import already pins the exact
-  version resolved from the archive, the import short-circuits before any download
-  (`already present, nothing to do`). `--update-tag <tag>` sets the `auto_update`
-  value recorded in the commit (default `debian:<dist>`); setting it decouples the
-  recorded series from the dist actually pulled from, so an import from a frozen
-  snapshot can record the logical series it stands in for. `--no-merge` stops
-  after building the import commit and prints a single JSON object on stdout
-  (`{pkg, version, commit, first_import, already_present}`) with all logging on
-  stderr, leaving HEAD and the working tree untouched for a caller to merge the
-  commit itself; an already-present version prints an empty `commit` with
-  `already_present` true. `--no-git-history` writes `pkgs/<package>/` directly
-  with no commit; a non-git working tree falls back to that mode with a warning.
+- `import <namespace>:<package>` — import an upstream source package into the
+  working tree. The namespace selects the import provider and is always explicit
+  (`debian:<package>` today): import creates `pkgs/<package>/`, so there is no
+  `build.yml` to dispatch on. By default the import is recorded on the package's
+  independent upstream lineage: a first import is an orphan commit, each later
+  import is parented on the previous import, and the commit — carrying a fenced
+  metadata block (`pkg`, `version`, `auto_update`) in its message — is built
+  entirely through git plumbing against a throwaway index, so the working tree is
+  never disturbed by the construction. The command then replaces itself with `git
+  merge` to bring the import into the current branch, so a merge conflict (or
+  clean merge) propagates verbatim as the command's own output and exit status.
+  When a prior import already pins the exact version resolved from the archive,
+  the import short-circuits before any download (`already present, nothing to
+  do`). `--update-tag <tag>` sets the `auto_update` value recorded in the commit
+  (default `debian:<dist>`); setting it decouples the recorded series from the
+  dist actually pulled from, so an import from a frozen snapshot can record the
+  logical series it stands in for. `--no-merge` stops after building the import
+  commit and prints a single JSON object on stdout (`{pkg, version, commit,
+  first_import, already_present}`) with all logging on stderr, leaving HEAD and
+  the working tree untouched for a caller to merge the commit itself; an
+  already-present version prints an empty `commit` with `already_present` true.
+  `--no-git-history` writes `pkgs/<package>/` directly with no commit; a non-git
+  working tree falls back to that mode with a warning. Provider-specific options
+  (repository, distribution, snapshot endpoint, keyring, signature verification)
+  travel on `--params key=val,...`; `--params-help <namespace>` prints what a
+  namespace accepts.
 - `get-pkg-metadata` — list the commits reachable from HEAD in topological order
   and print the most recent import metadata for each package that currently has a
   directory under `pkgs/`. Topological order places every commit before its
@@ -48,9 +54,25 @@ A hand-rolled subcommand dispatch over `os.Args[1]`, each command owning a
   line per updatable package on stdout with all logging on stderr; `--format
   json` prints an array of `{pkg, old, new}`. A pinned package the archive no
   longer offers is logged and skipped, not reported as an update. `--repo`,
-  `--dist`, `--keyring`, `--no-verify`, and `--conf-dir` are as for `import`.
-- `lockfile` / `lockfile-rootfs` — generate a package's build-tooling lock, or
-  the image configuration-tooling lock.
+  `--dist`, `--keyring`, and `--no-verify` select the archive to compare against,
+  and `--conf-dir` the working tree.
+- `lockfile <target>` — generate a pinned dependency lock. The `<target>` is
+  `<namespace>:<arg>`, or a bare namespace for a zero-argument one, selecting the
+  lock generator:
+  - `pkg:<name>` — the recommended developer form. It reads `pkg_type` from the
+    package's `build.yml` and dispatches to the matching concrete generator, so
+    the developer need not know whether a package is plain Debian or a special
+    case. Writes `pkgs/<name>/build-deps.yml`.
+  - `rootfs` — the image configuration-tooling lock. Writes top-level
+    `rootfs-deps.yml`.
+  - `debian:<name>` / `debian-kernel:<name>` — the concrete generators, invoked
+    directly for debugging.
+
+  Provider-specific options travel on `--params key=val,...`; `--params-help
+  <namespace>` prints what a namespace accepts (for `pkg`, the concatenation of
+  its delegates' help under each `pkg_type` heading). `--stub` locates the
+  `exec_env_stub` binary a container-backed generator needs; generators that run
+  no container ignore it.
 - `build` — drive the engine over the discovered artifact graph, with the
   interactive progress UI; `--invalidate` drops a target's cache entry, and
   `--target <Key>` builds only that one node — with `--no-recurse` the target's
@@ -122,13 +144,12 @@ A hand-rolled subcommand dispatch over `os.Args[1]`, each command owning a
   sandbox stack.
 
 The commands that open the object store for building or fetching — `import`,
-`lockfile` / `lockfile-rootfs`, `build`, `cache`, `restore-cache`, and `status` —
-route through `$GLBX_REGISTRY` (host[:port]/repo) when it is set, wiring a
-pull-through store so a local miss is served from the registry;
-`$GLBX_REGISTRY_INSECURE` selects plaintext HTTP for a local registry. `publish`
-reads the local store directly — never through the registry it fills — so it
-ignores `$GLBX_REGISTRY` for reads and takes its target from `--registry` or
-`$GLBX_REGISTRY`.
+`lockfile`, `build`, `cache`, `restore-cache`, and `status` — route through
+`$GLBX_REGISTRY` (host[:port]/repo) when it is set, wiring a pull-through store
+so a local miss is served from the registry; `$GLBX_REGISTRY_INSECURE` selects
+plaintext HTTP for a local registry. `publish` reads the local store directly —
+never through the registry it fills — so it ignores `$GLBX_REGISTRY` for reads
+and takes its target from `--registry` or `$GLBX_REGISTRY`.
 
 A registry that requires authentication is reached with `$GLBX_REGISTRY_TOKEN`
 (and `$GLBX_REGISTRY_USER`): on a `401` bearer challenge the client redeems a
