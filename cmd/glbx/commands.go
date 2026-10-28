@@ -3,86 +3,83 @@ package main
 import (
 	"flag"
 	"fmt"
+	"os"
+	"strings"
 
-	"github.com/gardenlinux/glbx/internal/buildcfg"
-	"github.com/gardenlinux/glbx/internal/debian/aptrepo"
-	"github.com/gardenlinux/glbx/internal/lockfile"
 	"github.com/gardenlinux/glbx/internal/log"
+	"github.com/gardenlinux/glbx/internal/provider"
 )
 
-func cmdLockfile(args []string) error {
-	fs := flag.NewFlagSet("lockfile", flag.ExitOnError)
-	repo := fs.String("repo", "https://deb.debian.org/debian", "APT repository URL")
-	snapshot := fs.String("snapshot", aptrepo.DefaultSnapshotBase, "snapshot archive file endpoint (SHA1-addressed), recorded as a secondary retrieval URL")
-	dist := fs.String("dist", "testing", "distribution")
-	arch := fs.String("arch", buildcfg.HostArch(), "target architecture")
-	cacheDir := fs.String("cache", "", "object-store cache directory")
-	outputDir := fs.String("output", ".", "working-tree root")
-	cookie := fs.String("cookie", "", "InRelease cache cookie (reuse a cached InRelease within a session)")
-	fs.Parse(args)
+// repeatedFlag collects a flag that may be given more than once; the values
+// accumulate in order.
+type repeatedFlag []string
 
-	if fs.NArg() < 1 {
-		return fmt.Errorf("usage: glbx lockfile [flags] <package-name>")
-	}
-
-	store, err := openStore(*cacheDir)
-	if err != nil {
-		return fmt.Errorf("open store: %w", err)
-	}
-	ctx, l := rootContext(log.Lockfile)
-
-	result, err := lockfile.Generate(lockfile.Config{
-		Ctx:          ctx,
-		Store:        store,
-		RepoURL:      *repo,
-		SnapshotBase: *snapshot,
-		Dist:         *dist,
-		Arch:         *arch,
-		OutputDir:    *outputDir,
-		PkgName:      fs.Arg(0),
-		Cookie:       *cookie,
-	})
-	if err != nil {
-		return err
-	}
-
-	l.Info("generated %s (%s): %d packages", result.Path, result.Arch, result.Packages)
+func (r *repeatedFlag) String() string { return strings.Join(*r, ",") }
+func (r *repeatedFlag) Set(v string) error {
+	*r = append(*r, v)
 	return nil
 }
 
-func cmdLockfileRootfs(args []string) error {
-	fs := flag.NewFlagSet("lockfile-rootfs", flag.ExitOnError)
-	repo := fs.String("repo", "https://deb.debian.org/debian", "APT repository URL")
-	snapshot := fs.String("snapshot", aptrepo.DefaultSnapshotBase, "snapshot archive file endpoint (SHA1-addressed), recorded as a secondary retrieval URL")
-	dist := fs.String("dist", "testing", "distribution")
-	arch := fs.String("arch", buildcfg.HostArch(), "target architecture")
+func cmdLockfile(args []string) error {
+	fs := flag.NewFlagSet("lockfile", flag.ExitOnError)
+	fs.Usage = func() {
+		fmt.Fprintln(os.Stderr, "usage: glbx lockfile [flags] <target>")
+		fmt.Fprintln(os.Stderr, "\nGenerate a pinned dependency lock. <target> is <namespace>:<arg>, or a")
+		fmt.Fprintln(os.Stderr, "bare namespace for a zero-argument one:")
+		fmt.Fprintln(os.Stderr, "  pkg:<name>            dispatch on the package's build.yml pkg_type")
+		fmt.Fprintln(os.Stderr, "  rootfs                the image configuration-tooling lock")
+		fmt.Fprintln(os.Stderr, "  debian:<name>         the plain Debian lock, directly")
+		fmt.Fprintln(os.Stderr, "  debian-kernel:<name>  the kernel lock, directly")
+		fmt.Fprintln(os.Stderr, "\nflags:")
+		fs.PrintDefaults()
+	}
+	var params repeatedFlag
+	fs.Var(&params, "params", "provider parameters as key=val,key=val (repeatable); see --params-help <namespace>")
+	paramsHelp := fs.String("params-help", "", "print the parameters a namespace accepts and exit")
 	cacheDir := fs.String("cache", "", "object-store cache directory")
 	outputDir := fs.String("output", ".", "working-tree root")
-	cookie := fs.String("cookie", "", "InRelease cache cookie (reuse a cached InRelease within a session)")
+	stubPath := fs.String("stub", "", "path to exec_env_stub binary (for container-backed providers)")
 	fs.Parse(args)
+
+	if *paramsHelp != "" {
+		g, err := provider.LookupLockGenerator(*paramsHelp)
+		if err != nil {
+			return err
+		}
+		fmt.Println(g.ParamsHelp())
+		return nil
+	}
+
+	if fs.NArg() < 1 {
+		fs.Usage()
+		return fmt.Errorf("missing <target> argument")
+	}
+	target, err := provider.ParseTarget(fs.Arg(0))
+	if err != nil {
+		return err
+	}
+	parsedParams, err := provider.ParseParams(params)
+	if err != nil {
+		return err
+	}
+	g, err := provider.LookupLockGenerator(target.Namespace)
+	if err != nil {
+		return err
+	}
 
 	store, err := openStore(*cacheDir)
 	if err != nil {
 		return fmt.Errorf("open store: %w", err)
 	}
-	ctx, l := rootContext(log.Lockfile)
+	ctx, _ := rootContext(log.Lockfile)
 
-	result, err := lockfile.GenerateRootfs(lockfile.RootfsConfig{
-		Ctx:          ctx,
-		Store:        store,
-		RepoURL:      *repo,
-		SnapshotBase: *snapshot,
-		Dist:         *dist,
-		Arch:         *arch,
-		OutputDir:    *outputDir,
-		Cookie:       *cookie,
-	})
-	if err != nil {
-		return err
-	}
-
-	l.Info("generated %s (%s): %d packages", result.Path, result.Arch, result.Packages)
-	return nil
+	return g.Generate(provider.OpContext{
+		Ctx:       ctx,
+		Store:     store,
+		OutputDir: *outputDir,
+		Params:    parsedParams,
+		StubPath:  *stubPath,
+	}, target.Arg)
 }
 
 func cmdStatus(args []string) error {

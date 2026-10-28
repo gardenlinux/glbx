@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/gardenlinux/glbx/internal/importer"
+	"github.com/gardenlinux/glbx/internal/provider"
 )
 
 // TestPrintImportResult asserts the --no-merge JSON surface: a committed import
@@ -14,12 +14,12 @@ import (
 func TestPrintImportResult(t *testing.T) {
 	cases := []struct {
 		name   string
-		result importer.ImportResult
+		result provider.ImportResult
 		want   importJSON
 	}{
 		{
 			name: "first import",
-			result: importer.ImportResult{
+			result: provider.ImportResult{
 				Name:        "glibc",
 				Version:     "2.41-1",
 				CommitHash:  "abc123",
@@ -29,7 +29,7 @@ func TestPrintImportResult(t *testing.T) {
 		},
 		{
 			name: "subsequent import",
-			result: importer.ImportResult{
+			result: provider.ImportResult{
 				Name:       "glibc",
 				Version:    "2.41-2",
 				CommitHash: "def456",
@@ -38,7 +38,7 @@ func TestPrintImportResult(t *testing.T) {
 		},
 		{
 			name: "already present",
-			result: importer.ImportResult{
+			result: provider.ImportResult{
 				Name:           "glibc",
 				Version:        "2.41-1",
 				AlreadyPresent: true,

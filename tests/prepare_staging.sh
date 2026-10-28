@@ -87,7 +87,7 @@ for pkg in "${PACKAGES[@]}"; do
 		continue
 	fi
 	echo "Importing $pkg..."
-	"$GLBX" import "${CACHE_ARGS[@]}" --cookie "$COOKIE" --output "$CONF_DIR" --no-verify "$pkg" \
+	"$GLBX" import "${CACHE_ARGS[@]}" --params "cookie=$COOKIE,no-verify=true" --output "$CONF_DIR" "debian:$pkg" \
 		|| { echo "FAIL: import $pkg"; exit 1; }
 done
 
@@ -130,7 +130,7 @@ for pkg in "${PACKAGES[@]}"; do
 	fi
 	[ -f "$TEMPLATES_DIR/$pkg/build.yml" ] && cp "$TEMPLATES_DIR/$pkg/build.yml" "$PKGS_DIR/$pkg/build.yml"
 	echo "Generating lockfile for $pkg..."
-	"$GLBX" lockfile "${CACHE_ARGS[@]}" --cookie "$COOKIE" --output "$CONF_DIR" "$pkg" \
+	"$GLBX" lockfile "${CACHE_ARGS[@]}" --params "cookie=$COOKIE" --stub "$STUB" --output "$CONF_DIR" "pkg:$pkg" \
 		|| { echo "FAIL: lockfile $pkg"; exit 1; }
 	# build.yml and its resolved lock are one logical change — one commit.
 	git_commit "configure $pkg build" "pkgs/$pkg"
@@ -141,8 +141,8 @@ if [ -f "$CONF_DIR/rootfs-deps.yml" ]; then
 else
 	[ -f "$TEMPLATES_DIR/rootfs.yml" ] && cp "$TEMPLATES_DIR/rootfs.yml" "$CONF_DIR/rootfs.yml"
 	echo "Generating rootfs lockfile..."
-	"$GLBX" lockfile-rootfs "${CACHE_ARGS[@]}" --cookie "$COOKIE" --output "$CONF_DIR" \
-		|| { echo "FAIL: lockfile-rootfs"; exit 1; }
+	"$GLBX" lockfile "${CACHE_ARGS[@]}" --params "cookie=$COOKIE" --stub "$STUB" --output "$CONF_DIR" rootfs \
+		|| { echo "FAIL: lockfile rootfs"; exit 1; }
 	git_commit "configure rootfs image" rootfs.yml rootfs-deps.yml
 fi
 
