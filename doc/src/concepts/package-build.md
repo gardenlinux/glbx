@@ -99,6 +99,29 @@ are never touched because the object store already has every pinned file. The
 URL ordering follows the same convention: the live Debian archive first, a
 snapshot URL as the durable cold-start fallback.
 
+### Generating the lock
+
+A developer regenerates a package's `build-deps.yml` with `glbx lockfile
+pkg:<name>`. The `pkg:` form dispatches on the package's declared **`pkg_type`**
+(see [`build.yml`](#declaring-dependencies-buildyml)): for an ordinary package
+(`pkg_type: debian`) the generator reads the package's `debian/control`,
+resolves the build-dependency closure against the archive, fetches every `.deb`,
+and writes the pins. The image configuration-tooling lock (`rootfs-deps.yml`) is
+generated the same way with the zero-argument `glbx lockfile rootfs`. A developer
+uses the same command regardless of a package's internal needs; the `pkg_type`
+selects the right generator behind the scenes.
+
+Some packages carry a `debian/control` that is itself a generated artifact —
+produced from templates and a defines file by the packaging's own tooling, and
+stale with respect to any edit a developer makes to those templates. Such a
+package sets `pkg_type: debian-kernel`, and its generator regenerates
+`debian/control` before locking: it stands up a throwaway container from the
+Essential set plus the `gen_control_pkgs` the package declares, runs the
+packaging's control-generation target inside it, copies the fresh control back
+into the source tree, and then resolves and writes the lock from that. The
+developer never runs the packaging's tooling by hand; `glbx lockfile pkg:<name>`
+remains the whole interface.
+
 ### The lockfile records availability, not use
 
 `build-deps.yml` is deliberately **not** authoritative about which tools a given
@@ -129,6 +152,20 @@ because they answer different questions: what a package needs *to compile*, and
 what its individual output binaries need *at runtime*. Conflating them — as a
 single flat "dependencies" list would — causes either needless rebuilds or
 unbuildable cycles.
+
+### `pkg_type` — selecting the lock generator
+
+`pkg_type` names how the package's `build-deps.yml` is generated: `debian` for
+an ordinary package whose committed `debian/control` is authoritative, or
+`debian-kernel` for a package whose `debian/control` is a generated artifact
+that must be regenerated before locking (see [Generating the
+lock](#generating-the-lock)). It is required for `glbx lockfile pkg:<name>` to
+work — there is no default — and has no effect on the build itself. A
+`debian-kernel` package also declares **`gen_control_pkgs`**: the tooling
+packages placed into the control-generation container on top of the Essential
+set (the hand-authored bootstrap tier the control-generation target needs, not
+the full build-dependency set, which the lock computes afterwards from the
+regenerated control).
 
 ### `build_depends` — compile-time edges
 

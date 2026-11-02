@@ -10,39 +10,59 @@ import (
 	"os/exec"
 	"syscall"
 
-	"github.com/gardenlinux/glbx/internal/debian/aptrepo"
-	"github.com/gardenlinux/glbx/internal/importer"
 	"github.com/gardenlinux/glbx/internal/log"
+	"github.com/gardenlinux/glbx/internal/provider"
 )
 
 func cmdImport(args []string) error {
 	fs := flag.NewFlagSet("import", flag.ExitOnError)
 	fs.Usage = func() {
-		fmt.Fprintln(os.Stderr, "usage: glbx import [flags] <package>")
-		fmt.Fprintln(os.Stderr, "\nImport a Debian source package. <package> is the source package name.")
-		fmt.Fprintln(os.Stderr, "By default the import is recorded as a commit on the package's upstream")
-		fmt.Fprintln(os.Stderr, "lineage and merged into the current branch.")
+		fmt.Fprintln(os.Stderr, "usage: glbx import [flags] <namespace>:<package>")
+		fmt.Fprintln(os.Stderr, "\nImport an upstream source package into the working tree. The namespace is")
+		fmt.Fprintln(os.Stderr, "always explicit (e.g. debian:linux): import creates pkgs/<name>/, so there")
+		fmt.Fprintln(os.Stderr, "is no build.yml to dispatch on. By default the import is recorded as a commit")
+		fmt.Fprintln(os.Stderr, "on the package's upstream lineage and merged into the current branch.")
 		fmt.Fprintln(os.Stderr, "\nflags:")
 		fs.PrintDefaults()
 	}
-	repo := fs.String("repo", "https://deb.debian.org/debian", "APT repository URL")
-	snapshot := fs.String("snapshot", aptrepo.DefaultSnapshotBase, "snapshot archive file endpoint (SHA1-addressed), recorded as a secondary retrieval URL")
-	dist := fs.String("dist", "testing", "distribution")
+	var params repeatedFlag
+	fs.Var(&params, "params", "provider parameters as key=val,key=val (repeatable); see --params-help <namespace>")
+	paramsHelp := fs.String("params-help", "", "print the parameters a namespace accepts and exit")
 	updateTag := fs.String("update-tag", "", "auto-update source recorded in the import commit (default \"debian:<dist>\")")
-	keyring := fs.String("keyring", "/usr/share/keyrings/debian-archive-keyring.gpg", "GPG keyring path")
 	cacheDir := fs.String("cache", "", "object-store cache directory")
 	outputDir := fs.String("output", ".", "working-tree root to import into")
-	noVerify := fs.Bool("no-verify", false, "skip GPG signature verification")
 	noGitHistory := fs.Bool("no-git-history", false, "write pkgs/<package>/ directly instead of recording an import commit")
 	noMerge := fs.Bool("no-merge", false, "build the import commit and print its result as JSON on stdout, without merging")
-	cookie := fs.String("cookie", "", "InRelease cache cookie (reuse a cached InRelease within a session)")
 	fs.Parse(args)
+
+	if *paramsHelp != "" {
+		imp, err := provider.LookupImporter(*paramsHelp)
+		if err != nil {
+			return err
+		}
+		fmt.Println(imp.ParamsHelp())
+		return nil
+	}
 
 	if fs.NArg() < 1 {
 		fs.Usage()
-		return fmt.Errorf("missing <package> argument")
+		return fmt.Errorf("missing <namespace>:<package> argument")
 	}
-	pkgName := fs.Arg(0)
+	target, err := provider.ParseTarget(fs.Arg(0))
+	if err != nil {
+		return err
+	}
+	if target.Arg == "" {
+		return fmt.Errorf("import target %q must name a package (e.g. debian:%s)", fs.Arg(0), target.Namespace)
+	}
+	parsedParams, err := provider.ParseParams(params)
+	if err != nil {
+		return err
+	}
+	imp, err := provider.LookupImporter(target.Namespace)
+	if err != nil {
+		return err
+	}
 
 	if *noMerge && *noGitHistory {
 		return fmt.Errorf("--no-merge requires git-history mode (it reports the import commit to merge); --no-git-history writes no commit")
@@ -63,19 +83,16 @@ func cmdImport(args []string) error {
 		ctx, l = rootContext(log.Importer)
 	}
 
-	result, err := importer.Import(importer.ImportConfig{
-		Ctx:          ctx,
-		Store:        store,
-		RepoURL:      *repo,
-		SnapshotBase: *snapshot,
-		Dist:         *dist,
-		UpdateTag:    *updateTag,
-		Keyring:      *keyring,
-		OutputDir:    *outputDir,
-		NoVerify:     *noVerify,
-		GitHistory:   !*noGitHistory,
-		Cookie:       *cookie,
-	}, pkgName)
+	result, err := imp.Import(provider.OpContext{
+		Ctx:       ctx,
+		Store:     store,
+		OutputDir: *outputDir,
+		Params:    parsedParams,
+	}, target.Arg, provider.ImportOptions{
+		GitHistory: !*noGitHistory,
+		Merge:      !*noMerge,
+		UpdateTag:  *updateTag,
+	})
 	if err != nil {
 		return err
 	}
@@ -130,7 +147,7 @@ type importJSON struct {
 
 // printImportResult writes the import result as a single JSON object for
 // --no-merge mode.
-func printImportResult(w io.Writer, result *importer.ImportResult) error {
+func printImportResult(w io.Writer, result *provider.ImportResult) error {
 	obj := importJSON{
 		Pkg:            result.Name,
 		Version:        result.Version,

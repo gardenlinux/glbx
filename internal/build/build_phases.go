@@ -264,6 +264,23 @@ func (s *DebianPkgBuild) runBuildInContainer(ctx context.Context, cont *containe
 
 	buildCreds := &container.Credentials{UID: 1000, GID: 1000}
 
+	// A package whose debian/control is a generated artifact (pkg_type:
+	// debian-kernel) must regenerate it before dpkg-buildpackage runs: the
+	// committed control carries a md5sum self-check keyed to the upstream
+	// changelog version, and the synthetic local version stamped onto the
+	// changelog makes that check fail, which debian/rules turns into a
+	// deliberate build-abort. Running debian/rules debian/control-real first
+	// regenerates control and the matching md5sum for the build-time version, so
+	// the self-check passes when dpkg-buildpackage's clean step re-evaluates it.
+	// The gen-control tooling is part of the package's own Build-Depends, so it
+	// is already present in the chroot.
+	if buildCfg.PkgType == "debian-kernel" {
+		l.Info("regenerating debian/control (pkg_type: debian-kernel)")
+		if err := execIn(ctx, cont, buildEnv, buildCreds, srcPath, "debian/rules", "debian/control-real"); err != nil {
+			return fmt.Errorf("regenerate debian/control: %w", err)
+		}
+	}
+
 	l.Info("dpkg-buildpackage --no-sign (cwd=%s, uid=1000)", srcPath)
 	buildStdout, buildStderr, buildCloseFn := log.NewExecWriters(ctx, log.Chroot)
 	devNull, err := os.Open(os.DevNull)
@@ -322,7 +339,7 @@ func (s *DebianPkgBuild) collectOutputs(ctx context.Context, cont *container.Con
 	for _, debFile := range debFiles {
 		containerPath := "/src/" + debFile
 
-		hash, err := pipeFromContainer(ctx, cont, store, containerPath)
+		hash, err := pipeFromContainer(cont, store, containerPath)
 		if err != nil {
 			return nil, fmt.Errorf("store %s: %w", debFile, err)
 		}

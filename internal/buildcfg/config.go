@@ -16,6 +16,17 @@ import (
 
 // BuildYML is the hand-authored per-package build declaration, build.yml.
 type BuildYML struct {
+	// PkgType selects the lockfile provider the pkg: generator dispatches to
+	// (e.g. "debian", "debian-kernel"). It is required to generate a lock
+	// through the pkg: forwarder, which errors when it is empty; there is no
+	// default. It has no effect on the build itself.
+	PkgType string `yaml:"pkg_type"`
+
+	// GenControlPkgs lists packages placed into the control-generation container
+	// on top of the essential set. It is consumed only by lockfile providers
+	// that regenerate a control file before locking (pkg_type: debian-kernel).
+	GenControlPkgs []string `yaml:"gen_control_pkgs"`
+
 	BuildProfiles []string `yaml:"build_profiles"`
 	BuildOptions  []string `yaml:"build_options"`
 	ExtraBuildEnv []string `yaml:"extra_build_env"`
