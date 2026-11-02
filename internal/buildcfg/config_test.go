@@ -18,7 +18,9 @@ func writeFile(t *testing.T, path, content string) {
 
 func TestLoadBuildYML_Full(t *testing.T) {
 	dir := t.TempDir()
-	writeFile(t, filepath.Join(dir, "build.yml"), `build_profiles: [nocheck, noudeb]
+	writeFile(t, filepath.Join(dir, "build.yml"), `pkg_type: debian-kernel
+gen_control_pkgs: [debhelper, python3, quilt]
+build_profiles: [nocheck, noudeb]
 build_options: [nocheck]
 extra_build_env:
   - "DEB_CFLAGS_APPEND=-Wno-error"
@@ -33,6 +35,12 @@ lockfile_deps:
 	cfg, err := LoadBuildYML(dir)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if cfg.PkgType != "debian-kernel" {
+		t.Fatalf("PkgType: %q", cfg.PkgType)
+	}
+	if len(cfg.GenControlPkgs) != 3 || cfg.GenControlPkgs[2] != "quilt" {
+		t.Fatalf("GenControlPkgs: %v", cfg.GenControlPkgs)
 	}
 	if len(cfg.BuildProfiles) != 2 || cfg.BuildProfiles[0] != "nocheck" {
 		t.Fatalf("BuildProfiles: %v", cfg.BuildProfiles)

@@ -1,3 +1,4 @@
+pkg_type: debian
 build_profiles: [nocheck, noudeb, nopython]
 build_options: [nocheck]
 runtime_depends:

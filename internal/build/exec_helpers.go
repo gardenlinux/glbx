@@ -38,54 +38,21 @@ func execIn(ctx context.Context, cont *container.Container, env []string, creds 
 	return err
 }
 
-// pipeFromContainer reads a file from inside the container by exec'ing cat and
-// piping stdout directly into the object store.
-func pipeFromContainer(ctx context.Context, cont *container.Container, store *objstore.Store, path string) (objstore.Hash, error) {
-	r, w, err := os.Pipe()
+// pipeFromContainer reads a file from inside the container and streams it into
+// the object store. The container hands back a real file descriptor for the
+// path over its IPC channel, so the bytes flow straight into the hash-on-write
+// store without buffering the whole file or involving an in-container process.
+func pipeFromContainer(cont *container.Container, store *objstore.Store, path string) (objstore.Hash, error) {
+	f, err := cont.Open(path, os.O_RDONLY, 0)
 	if err != nil {
 		return objstore.Hash{}, err
 	}
+	defer f.Close()
 
-	devNull, err := os.Open(os.DevNull)
+	hash, err := store.Blobs.Store(f)
 	if err != nil {
-		r.Close()
-		w.Close()
-		return objstore.Hash{}, err
+		return objstore.Hash{}, fmt.Errorf("store %s: %w", path, err)
 	}
-	defer devNull.Close()
-
-	_, stderrFD, closeFn := log.NewExecWriters(ctx, log.Exec)
-
-	pid, err := cont.Exec(&container.ExecRequest{
-		Argv: []string{"cat", path},
-		Cwd:  "/",
-		FDs:  []*os.File{devNull, w, stderrFD},
-	})
-	w.Close()
-	stderrFD.Close()
-	if err != nil {
-		closeFn()
-		r.Close()
-		return objstore.Hash{}, err
-	}
-
-	hash, err := store.Blobs.Store(r)
-	r.Close()
-	if err != nil {
-		cont.Wait(pid)
-		closeFn()
-		return objstore.Hash{}, err
-	}
-
-	exitCode, err := cont.Wait(pid)
-	closeFn()
-	if err != nil {
-		return objstore.Hash{}, err
-	}
-	if exitCode != 0 {
-		return objstore.Hash{}, fmt.Errorf("cat %s exited with code %d", path, exitCode)
-	}
-
 	return hash, nil
 }
 
