@@ -78,7 +78,7 @@ func (s *DebianPkgBuild) setupBuildEnv(ctx context.Context, store *objstore.Stor
 		stack.Close()
 		return nil, nil, fmt.Errorf("mkdir %s: %w", srcRoot, err)
 	}
-	if err := mountNS.Mount("tmpfs", srcRoot, "tmpfs", 0, "size=16g"); err != nil {
+	if err := mountNS.Mount("tmpfs", srcRoot, "tmpfs", 0, "size=128g"); err != nil {
 		stack.Close()
 		return nil, nil, fmt.Errorf("mount tmpfs on %s: %w", srcRoot, err)
 	}
@@ -311,7 +311,42 @@ func (s *DebianPkgBuild) runBuildInContainer(ctx context.Context, cont *containe
 		return fmt.Errorf("dpkg-buildpackage exited with code %d", exitCode)
 	}
 
+	s.reportSrcUsage(ctx, cont, srcPath)
 	return nil
+}
+
+// reportSrcUsage logs the filesystem usage of the tmpfs the source build ran
+// on: used space in GiB, the percent of size consumed, and the percent of the
+// inode capacity consumed. It reads raw statvfs fields via `stat -f`. Failures
+// are non-fatal.
+func (s *DebianPkgBuild) reportSrcUsage(ctx context.Context, cont *container.Container, srcPath string) {
+	l := log.From(ctx, log.Build)
+
+	// Raw statvfs fields: %S block size, %b total blocks, %a free blocks,
+	// %c total inodes, %d free inodes.
+	raw, err := execCapture(ctx, cont, nil, srcPath, "stat", "-f", "-c", "%S %b %a %c %d", ".")
+	if err != nil {
+		l.Warn("src usage: stat -f failed: %v", err)
+		return
+	}
+	raw = strings.TrimSpace(raw)
+
+	var bsize, blocks, bfree, files, ffree uint64
+	if _, err := fmt.Sscan(raw, &bsize, &blocks, &bfree, &files, &ffree); err != nil {
+		l.Warn("src usage: parse statvfs %q: %v", raw, err)
+		return
+	}
+
+	usedBytes := (blocks - bfree) * bsize
+	var sizePct, inodePct float64
+	if blocks > 0 {
+		sizePct = float64(blocks-bfree) / float64(blocks) * 100
+	}
+	if files > 0 {
+		inodePct = float64(files-ffree) / float64(files) * 100
+	}
+	l.Info("src tmpfs usage: %.2f GiB used, %.1f%% of size, %.1f%% of inodes",
+		float64(usedBytes)/(1<<30), sizePct, inodePct)
 }
 
 // collectOutputs lists the .deb files produced inside /src/, pipes each into
