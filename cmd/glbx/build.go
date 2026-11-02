@@ -34,6 +34,7 @@ func cmdBuild(args []string) error {
 	confDir := fs.String("conf-dir", "", "configuration directory")
 	stubPath := fs.String("stub", "", "path to exec_env_stub binary")
 	invalidate := fs.String("invalidate", "", "delete the map entry for the target with this Key (e.g. rootfs:amd64) and exit")
+	printID := fs.String("print-id", "", "print the identity (map key) of the target with this Key (e.g. rootfs:amd64) and exit")
 	listOutputs := fs.String("list-outputs", "", "print the output names of the already-built target with this Key (e.g. rootfs:amd64) and exit")
 	outputPath := fs.String("output-path", "", "print the cache path of one named output of the already-built target with this Key; the output name is a positional argument")
 	target := fs.String("target", "", "build only the node with this Key (e.g. rootfs:amd64); other nodes must resolve from cache")
@@ -74,6 +75,19 @@ func cmdBuild(args []string) error {
 	})
 	if err != nil {
 		return fmt.Errorf("build graph: %w", err)
+	}
+
+	if *printID != "" {
+		a := graphResult.Graph.Find(*printID)
+		if a == nil {
+			return fmt.Errorf("no artifact with Key %q in graph", *printID)
+		}
+		identity, err := a.Identity()
+		if err != nil {
+			return fmt.Errorf("compute identity for %s: %w", *printID, err)
+		}
+		fmt.Println(identity)
+		return nil
 	}
 
 	if *invalidate != "" {
