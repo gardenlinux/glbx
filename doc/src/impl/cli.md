@@ -74,7 +74,8 @@ A hand-rolled subcommand dispatch over `os.Args[1]`, each command owning a
   `exec_env_stub` binary a container-backed generator needs; generators that run
   no container ignore it.
 - `build` — drive the engine over the discovered artifact graph, with the
-  interactive progress UI; `--invalidate` drops a target's cache entry, and
+  interactive progress UI; `--invalidate` drops a target's cache entry,
+  `--print-id <Key>` prints a target's identity (its map key) and exits, and
   `--target <Key>` builds only that one node — with `--no-recurse` the target's
   dependencies must resolve from the cache (a missing dependency fails the
   target), so the pair builds exactly one node from cached inputs and its exit
