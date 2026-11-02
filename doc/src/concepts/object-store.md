@@ -99,6 +99,11 @@ is what keeps it simple — the only thing that keeps a blob is being wanted *no
 so there is no permanent state on disk to protect and nothing a cleanup can lose
 for good.
 
+The build layer also places a `tmp/` directory alongside `blobs/` and `map/`
+under the same root: per-build scratch space for the source build, on the same
+disk as the cache. It is not part of the store — each build creates its own
+subdirectory there and removes it when it finishes.
+
 ## The store interface
 
 Everything above describes a *local* store, but the system also wants a shared

@@ -17,18 +17,20 @@ type PackageSet struct {
 	arch         string
 	store        *objstore.Store
 	stubPath     string
+	scratchDir   string
 	sourceBuilds map[string]*DebianPkgBuild
 	localSet     map[string]bool
 	providesMap  map[string][]string // binary pkg name → virtual packages it provides
 }
 
 // NewPackageSet scans the packages directory and creates the registry.
-func NewPackageSet(pkgsDir, arch string, store *objstore.Store, stubPath string) (*PackageSet, error) {
+func NewPackageSet(pkgsDir, arch string, store *objstore.Store, stubPath, scratchDir string) (*PackageSet, error) {
 	ps := &PackageSet{
 		pkgsDir:      pkgsDir,
 		arch:         arch,
 		store:        store,
 		stubPath:     stubPath,
+		scratchDir:   scratchDir,
 		sourceBuilds: make(map[string]*DebianPkgBuild),
 		localSet:     make(map[string]bool),
 		providesMap:  make(map[string][]string),
@@ -51,11 +53,12 @@ func NewPackageSet(pkgsDir, arch string, store *objstore.Store, stubPath string)
 		}
 
 		sb := NewDebianPkgBuild(DebianPkgBuildConfig{
-			Name:     name,
-			PkgDir:   dir,
-			Arch:     arch,
-			Store:    store,
-			StubPath: stubPath,
+			Name:       name,
+			PkgDir:     dir,
+			Arch:       arch,
+			Store:      store,
+			StubPath:   stubPath,
+			ScratchDir: scratchDir,
 		})
 		sb.pkgSet = ps
 		ps.sourceBuilds[name] = sb
@@ -118,6 +121,9 @@ type GraphConfig struct {
 	Arch     string
 	Store    *objstore.Store
 	StubPath string
+	// ScratchDir is the on-disk directory under which source builds allocate
+	// their scratch space. Empty means objstore.DefaultRoot()/tmp.
+	ScratchDir string
 }
 
 // GraphResult holds the constructed artifact graph and its components.
@@ -131,7 +137,7 @@ type GraphResult struct {
 // walk the dependency chain to build the graph.
 func BuildGraph(cfg GraphConfig) (*GraphResult, error) {
 	pkgsDir := filepath.Join(cfg.ConfDir, "pkgs")
-	ps, err := NewPackageSet(pkgsDir, cfg.Arch, cfg.Store, cfg.StubPath)
+	ps, err := NewPackageSet(pkgsDir, cfg.Arch, cfg.Store, cfg.StubPath, cfg.ScratchDir)
 	if err != nil {
 		return nil, err
 	}

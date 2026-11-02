@@ -64,6 +64,7 @@ type DebianPkgBuild struct {
 	Arch         string
 	DepArtifacts []artifact.Artifact
 	StubPath     string
+	ScratchDir   string
 	store        *objstore.Store
 	identity     objstore.Hash
 	binaries     map[string]*debianBinaryPkg
@@ -78,6 +79,9 @@ type DebianPkgBuildConfig struct {
 	DepArtifacts []artifact.Artifact
 	Store        *objstore.Store
 	StubPath     string
+	// ScratchDir is the on-disk directory under which each build allocates its
+	// source-build scratch space. Empty means objstore.DefaultRoot()/tmp.
+	ScratchDir string
 }
 
 func NewDebianPkgBuild(cfg DebianPkgBuildConfig) *DebianPkgBuild {
@@ -97,6 +101,7 @@ func NewDebianPkgBuild(cfg DebianPkgBuildConfig) *DebianPkgBuild {
 		Arch:         cfg.Arch,
 		DepArtifacts: cfg.DepArtifacts,
 		StubPath:     stubPath,
+		ScratchDir:   cfg.ScratchDir,
 		store:        cfg.Store,
 		binaries:     make(map[string]*debianBinaryPkg),
 	}

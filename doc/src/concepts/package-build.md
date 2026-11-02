@@ -220,7 +220,10 @@ build assembles:
 3. **The source tree.** The `debian/` tree and the orig archive(s) — fetched
    from the object store by the hashes in `sources.yml` — are combined into the
    full source tree ready for `dpkg-buildpackage`. (A native package is already
-   a whole tree and needs no orig.)
+   a whole tree and needs no orig.) The source tree and the whole compile run on
+   a disk-backed scratch directory under the cache root (`<cache>/tmp`, a sibling
+   of the blob store), bind-mounted into the chroot, so a large build spills to
+   disk rather than to RAM. The directory is removed when the build finishes.
 
 Blobs are bind-mounted from the object store rather than copied, so assembling a
 chroot does not duplicate hundreds of megabytes of `.deb`s per build. The build

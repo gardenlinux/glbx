@@ -57,6 +57,13 @@ func resolveCacheDir(dir string) string {
 	return dir
 }
 
+// scratchDir returns the source-build scratch root for the cache directory dir:
+// a tmp/ subdirectory of the resolved cache root, so build scratch spills to the
+// same disk as the cache rather than to RAM.
+func scratchDir(dir string) string {
+	return filepath.Join(resolveCacheDir(dir), "tmp")
+}
+
 // registryFromEnv reads the remote registry configuration from the environment:
 // GLBX_REGISTRY is the "host[:port]/repo" reference (empty disables the remote),
 // and GLBX_REGISTRY_INSECURE selects plaintext HTTP for a local test registry.

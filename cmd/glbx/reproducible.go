@@ -63,10 +63,11 @@ func cmdBuildCheckReproducible(args []string) error {
 	ctx, l := rootContext(log.Reprod)
 
 	graphResult, err := build.BuildGraph(build.GraphConfig{
-		ConfDir:  confRoot,
-		Arch:     *arch,
-		Store:    store,
-		StubPath: *stubPath,
+		ConfDir:    confRoot,
+		Arch:       *arch,
+		Store:      store,
+		StubPath:   *stubPath,
+		ScratchDir: scratchDir(*cacheDir),
 	})
 	if err != nil {
 		return fmt.Errorf("build graph: %w", err)

@@ -19,7 +19,7 @@ func TestRootfsIdentityChangesWhenTransitiveDepChanges(t *testing.T) {
 	os.WriteFile(filepath.Join(appDir, "build.yml"), []byte("build_depends: [\"lib:lib1\"]\n"), 0644)
 
 	identity := func() string {
-		ps, err := NewPackageSet(filepath.Join(root, "pkgs"), "amd64", store, "")
+		ps, err := NewPackageSet(filepath.Join(root, "pkgs"), "amd64", store, "", "")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -52,7 +52,7 @@ func TestRootfsIdentityStable(t *testing.T) {
 	writeSourcePkg(t, filepath.Join(root, "pkgs", "app"), "Source: app\nPackage: app-bin\nArchitecture: any\n", "")
 
 	identity := func() string {
-		ps, _ := NewPackageSet(filepath.Join(root, "pkgs"), "amd64", store, "")
+		ps, _ := NewPackageSet(filepath.Join(root, "pkgs"), "amd64", store, "", "")
 		bp, _ := ps.Binary("app", "app-bin")
 		id, err := newRootfsDirect("amd64", []*debianBinaryPkg{bp}, store).Identity()
 		if err != nil {
@@ -71,7 +71,7 @@ func TestPackageSetDiscovery(t *testing.T) {
 	root := t.TempDir()
 	writeSourcePkg(t, filepath.Join(root, "pkgs", "foo"), "Source: foo\nPackage: foo1\nProvides: virtfoo\n", "")
 
-	ps, err := NewPackageSet(filepath.Join(root, "pkgs"), "amd64", store, "")
+	ps, err := NewPackageSet(filepath.Join(root, "pkgs"), "amd64", store, "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
