@@ -78,9 +78,29 @@ func (s *DebianPkgBuild) setupBuildEnv(ctx context.Context, store *objstore.Stor
 		stack.Close()
 		return nil, nil, fmt.Errorf("mkdir %s: %w", srcRoot, err)
 	}
-	if err := mountNS.Mount("tmpfs", srcRoot, "tmpfs", 0, "size=128g"); err != nil {
+	// The source tree and the whole compile run on scratchRoot/glbx-src-<rand>,
+	// a disk-backed directory bind-mounted over srcRoot. It lives under the cache
+	// dir (objstore.DefaultRoot()/tmp by default) so large builds spill to disk
+	// instead of filling RAM. The directory is created on the host via the base
+	// context and removed, along with its contents, in cleanup.
+	hostFs := container.NewBaseFsContext()
+	scratchRoot := s.ScratchDir
+	if scratchRoot == "" {
+		scratchRoot = filepath.Join(objstore.DefaultRoot(), "tmp")
+	}
+	if err := hostFs.Mkdir(scratchRoot, 0755); err != nil && !os.IsExist(err) {
 		stack.Close()
-		return nil, nil, fmt.Errorf("mount tmpfs on %s: %w", srcRoot, err)
+		return nil, nil, fmt.Errorf("mkdir scratch root %s: %w", scratchRoot, err)
+	}
+	hostScratch, err := hostFs.MkTempDir(scratchRoot, "glbx-src-")
+	if err != nil {
+		stack.Close()
+		return nil, nil, fmt.Errorf("mktempdir scratch %s: %w", scratchRoot, err)
+	}
+	if err := mountNS.Mount(hostScratch, srcRoot, "", syscall.MS_BIND, ""); err != nil {
+		hostFs.Rmdir(hostScratch)
+		stack.Close()
+		return nil, nil, fmt.Errorf("bind-mount scratch on %s: %w", srcRoot, err)
 	}
 
 	l.Debug("extracting %d build-dep packages", len(pkgs))
@@ -127,6 +147,7 @@ func (s *DebianPkgBuild) setupBuildEnv(ctx context.Context, store *objstore.Stor
 		return nil, nil, fmt.Errorf("copy source: %w", err)
 	}
 
+	var origBinds []string
 	for _, ref := range refs {
 		if strings.HasSuffix(ref.File, ".asc") || strings.HasSuffix(ref.File, ".sig") {
 			continue
@@ -145,6 +166,7 @@ func (s *DebianPkgBuild) setupBuildEnv(ctx context.Context, store *objstore.Stor
 			l.Warn("bind-mount orig tarball %s: %v", ref.File, err)
 			continue
 		}
+		origBinds = append(origBinds, tarDst)
 	}
 
 	for i, ref := range refs {
@@ -197,7 +219,23 @@ func (s *DebianPkgBuild) setupBuildEnv(ctx context.Context, store *objstore.Stor
 
 	cleanup := func() {
 		cont.Close()
+		// The orig-tarball blobs are bind-mounted into the scratch tree; unmount
+		// them so the scratch contents can be removed. The contents are owned by
+		// mapped subuids and so must be removed by the namespace-root stub while
+		// the mount namespace is still alive. Tearing down the stack then unmounts
+		// the src bind, leaving the empty host-owned scratch directory to remove.
+		for _, bind := range origBinds {
+			if err := mountNS.Umount(bind, 0); err != nil {
+				l.Warn("unmount orig bind %s: %v", bind, err)
+			}
+		}
+		if err := removeDirContents(mountNS, srcRoot); err != nil {
+			l.Warn("remove scratch contents %s: %v", srcRoot, err)
+		}
 		stack.Close()
+		if err := hostFs.Rmdir(hostScratch); err != nil {
+			l.Warn("rmdir scratch %s: %v", hostScratch, err)
+		}
 	}
 	return cont, cleanup, nil
 }
@@ -311,7 +349,7 @@ func (s *DebianPkgBuild) runBuildInContainer(ctx context.Context, cont *containe
 		return fmt.Errorf("dpkg-buildpackage exited with code %d", exitCode)
 	}
 
-	s.reportSrcUsage(ctx, cont, srcPath)
+	// s.reportSrcUsage(ctx, cont, srcPath)
 	return nil
 }
 

@@ -54,10 +54,11 @@ func cmdGraph(args []string) error {
 	}
 
 	graphResult, err := build.BuildGraph(build.GraphConfig{
-		ConfDir:  confRoot,
-		Arch:     *arch,
-		Store:    store,
-		StubPath: *stubPath,
+		ConfDir:    confRoot,
+		Arch:       *arch,
+		Store:      store,
+		StubPath:   *stubPath,
+		ScratchDir: scratchDir(*cacheDir),
 	})
 	if err != nil {
 		return fmt.Errorf("build graph: %w", err)

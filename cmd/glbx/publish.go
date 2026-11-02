@@ -60,10 +60,11 @@ func cmdPublish(args []string) error {
 	_, l := rootContext(log.Engine)
 
 	graphResult, err := build.BuildGraph(build.GraphConfig{
-		ConfDir:  confRoot,
-		Arch:     *arch,
-		Store:    store,
-		StubPath: *stubPath,
+		ConfDir:    confRoot,
+		Arch:       *arch,
+		Store:      store,
+		StubPath:   *stubPath,
+		ScratchDir: scratchDir(storeDir),
 	})
 	if err != nil {
 		return fmt.Errorf("build graph: %w", err)

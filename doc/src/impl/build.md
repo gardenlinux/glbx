@@ -19,9 +19,11 @@ store meet.
 - **Source build** (`DebianPkgBuild`): identity folds the source dirhash, the
   architecture, and its built-from dependency identities. Its build action
   assembles the chroot (pinned tooling unpacked in, locally built dependencies
-  layered over, source tree and pinned archives staged), applies the
-  content-derived local version, runs the Debian source build unprivileged, and
-  harvests every produced `.deb` and its control stanza into the store.
+  layered over, source tree and pinned archives staged onto a disk-backed scratch
+  directory under the cache root — `<cache>/tmp`, bind-mounted in and removed
+  after — rather than a RAM tmpfs), applies the content-derived local version,
+  runs the Debian source build unprivileged, and harvests every produced `.deb`
+  and its control stanza into the store.
 - **Binary validation** (`debianBinaryPkg`): a built-from edge to its source
   build and carried-along edges to co-emitted siblings. Its build action checks
   that every runtime dependency is satisfiable from locally built binaries (with

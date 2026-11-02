@@ -75,10 +75,11 @@ func cacheGC(args []string) error {
 		l.Warn("no conf-dir found; GC keep-set is empty (all build outputs collectible)")
 	} else {
 		graphResult, err := build.BuildGraph(build.GraphConfig{
-			ConfDir:  confRoot,
-			Arch:     *arch,
-			Store:    store,
-			StubPath: *stubPath,
+			ConfDir:    confRoot,
+			Arch:       *arch,
+			Store:      store,
+			StubPath:   *stubPath,
+			ScratchDir: scratchDir(""),
 		})
 		if err != nil {
 			return fmt.Errorf("build graph: %w", err)

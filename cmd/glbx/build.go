@@ -66,10 +66,11 @@ func cmdBuild(args []string) error {
 	ctx, l := rootContext(log.Engine)
 
 	graphResult, err := build.BuildGraph(build.GraphConfig{
-		ConfDir:  confRoot,
-		Arch:     *arch,
-		Store:    store,
-		StubPath: *stubPath,
+		ConfDir:    confRoot,
+		Arch:       *arch,
+		Store:      store,
+		StubPath:   *stubPath,
+		ScratchDir: scratchDir(storeDir),
 	})
 	if err != nil {
 		return fmt.Errorf("build graph: %w", err)
@@ -261,10 +262,11 @@ func viewTreeLogs(store *objstore.Store, confDir, arch, stubPath, target string)
 	}
 
 	graphResult, err := build.BuildGraph(build.GraphConfig{
-		ConfDir:  confRoot,
-		Arch:     arch,
-		Store:    store,
-		StubPath: stubPath,
+		ConfDir:    confRoot,
+		Arch:       arch,
+		Store:      store,
+		StubPath:   stubPath,
+		ScratchDir: scratchDir(""),
 	})
 	if err != nil {
 		return fmt.Errorf("build graph: %w", err)
