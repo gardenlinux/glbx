@@ -204,6 +204,14 @@ func (s *DebianPkgBuild) setupBuildEnv(ctx context.Context, store *objstore.Stor
 		return nil, nil, fmt.Errorf("stamp gl changelog: %w", err)
 	}
 
+	// Bind the signing sockets in the parent mount namespace (so the host-side
+	// socket paths are still visible as mount sources) and at a path the
+	// container does not later overmount.
+	if err := s.bindSigningMounts(mountNS.RemoteExecEnv, rootfsPath); err != nil {
+		stack.Close()
+		return nil, nil, fmt.Errorf("bind signing mounts: %w", err)
+	}
+
 	l.Debug("creating container (rootfs on tmpfs)")
 	cont, err := container.NewContainer(container.ContainerConfig{
 		Ctx:      ctx,
@@ -299,6 +307,7 @@ func (s *DebianPkgBuild) runBuildInContainer(ctx context.Context, cont *containe
 		buildEnv = append(buildEnv, "DEB_BUILD_OPTIONS="+strings.Join(buildCfg.BuildOptions, " "))
 	}
 	buildEnv = append(buildEnv, buildCfg.ExtraBuildEnv...)
+	buildEnv = append(buildEnv, signingEnv(s.signingMnts)...)
 
 	buildCreds := &container.Credentials{UID: 1000, GID: 1000}
 

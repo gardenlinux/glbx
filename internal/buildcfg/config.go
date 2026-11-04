@@ -40,6 +40,31 @@ type BuildYML struct {
 	// tolerated in that binary's validation: dependencies satisfied from the
 	// pinned tooling rather than locally built. Per-binary and not inherited.
 	LockfileDeps map[string][]string `yaml:"lockfile_deps"`
+
+	// Signing requests out-of-container signing for this package. When non-empty,
+	// the build runs a host-side signing service per entry and makes it reachable
+	// inside the container over a Unix socket, so the package can sign artifacts
+	// without the private key ever entering the container. Each entry names a key
+	// (its socket mount point), the host-side private key and public cert, and
+	// where the cert is made visible to the build.
+	Signing []SigningKey `yaml:"signing"`
+}
+
+// SigningKey is one signing identity exposed to a build. The private key and the
+// certificate both stay on the host (the signing service reads them) and are
+// served to the build over the signing socket; neither is a file in the
+// container.
+type SigningKey struct {
+	// KeyName identifies the key and dictates its socket mount point inside the
+	// container: /glbx/signing-service/<KeyName>. Keep it short.
+	KeyName string `yaml:"key_name"`
+	// PrivateKeyFile is the host-side PEM private key, resolved relative to the
+	// conf dir. It is never mounted or copied into the container.
+	PrivateKeyFile string `yaml:"private_key_file"`
+	// CertFile is the host-side public X.509 cert matching the key, resolved
+	// relative to the conf dir. Its content is folded into the build identity and
+	// it is served to the build over the signing socket.
+	CertFile string `yaml:"cert_file"`
 }
 
 // LoadBuildYML reads build.yml from a package directory, returning the zero

@@ -43,3 +43,25 @@ store meet.
 
 `PackageSet` scans the working tree and resolves `<source>:<binary>` references;
 `BuildGraph` turns an image's package list into a discovered graph.
+
+- **Signing** (`signing.go` + `internal/signing`): when a source build's
+  `build.yml` carries a `signing` block, the build starts a host-side signing
+  service (`internal/signing`) per key on a `SOCK_SEQPACKET` socket, bind-mounts
+  each socket into the container, sets `GLBX_SIGN_SOCKET`, and adds the PKCS#11
+  forwarding-module package as an implicit dependency (installed and folded into
+  identity, never written to a dependency file). Each key's certificate content
+  is also folded into the build identity. The service owns the private key and
+  the certificate and serves public key, certificate, and signatures over the
+  socket behind a pluggable backend; the built-in backend invokes OpenSSL against
+  a key file and signs ECDSA deterministically. See [Out-of-container
+  signing](../concepts/out-of-container-signing.md).
+
+## `internal/signing`
+
+The host side of out-of-container signing: a `Serve` loop over a
+message-boundary-preserving Unix socket answering public-key, certificate, and
+sign requests (protobuf), and a `Backend` interface whose key-file implementation
+shells out to OpenSSL. It holds the private key and certificate, and converts
+OpenSSL's DER ECDSA output to the raw form PKCS#11 returns; the in-container
+forwarding module (shipped as its own package) never sees the key, and the
+certificate reaches the build only over the socket.

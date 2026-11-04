@@ -1,0 +1,55 @@
+syntax = "proto3";
+
+package glbxsign;
+
+option go_package = "github.com/gardenlinux/glbx/internal/signing/pb";
+
+// ECPublicKey and RSAPublicKey carry the public parameters a PKCS#11 consumer
+// needs to describe a key object. They never carry private material.
+message ECPublicKey {
+  bytes params = 1; // DER of the named-curve OID (PKCS#11 CKA_EC_PARAMS)
+  bytes point = 2;  // DER octet string of the public point (CKA_EC_POINT)
+}
+
+message RSAPublicKey {
+  bytes modulus = 1;  // CKA_MODULUS
+  bytes exponent = 2; // CKA_PUBLIC_EXPONENT
+}
+
+message PublicKeyRequest {}
+
+message PublicKeyResponse {
+  oneof key {
+    ECPublicKey ec = 1;
+    RSAPublicKey rsa = 2;
+  }
+  string error = 3;
+}
+
+message SignRequest {
+  bytes digest = 1;    // pre-computed message digest
+  string hash_algo = 2;
+}
+
+message SignResponse {
+  bytes signature = 1; // raw r||s for ECDSA, raw block for RSA PKCS#1 v1.5
+  string error = 2;
+}
+
+message CertRequest {}
+
+message CertResponse {
+  bytes der = 1; // the public X.509 certificate, DER-encoded
+  string error = 2;
+}
+
+message Envelope {
+  oneof msg {
+    PublicKeyRequest public_key_request = 1;
+    PublicKeyResponse public_key_response = 2;
+    SignRequest sign_request = 3;
+    SignResponse sign_response = 4;
+    CertRequest cert_request = 5;
+    CertResponse cert_response = 6;
+  }
+}
