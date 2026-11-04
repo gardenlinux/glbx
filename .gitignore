@@ -4,5 +4,8 @@ doc/book/
 doc/.serve.pid
 doc/.serve.log
 
+# Generated protobuf bindings (regenerated from the .proto by `make`).
+internal/signing/pb/
+
 # Go test binaries.
 *.test

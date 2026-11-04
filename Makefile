@@ -1,10 +1,16 @@
-.PHONY: all build build_demo fmt vet test e2e doc clean
+.PHONY: all build build_demo fmt vet test e2e doc proto clean
 
 # bin/ is the canonical build output. Tests and the e2e driver consume the
 # binaries from here rather than rebuilding via `go build`.
 BIN_DIR := $(CURDIR)/bin
 GLBX_BIN := $(BIN_DIR)/glbx
 STUB_BIN := $(BIN_DIR)/exec_env_stub
+
+# Generated protobuf bindings for the signing wire protocol. Regenerated from the
+# .proto on every build; protoc and protoc-gen-go must be installed (the latter
+# via `go install google.golang.org/protobuf/cmd/protoc-gen-go@latest`).
+SIGN_PROTO := internal/signing/sign.proto
+SIGN_PB := internal/signing/pb/sign.pb.go
 
 # Pin to the installed toolchain so the module's go directive never triggers a
 # toolchain download mid-build.
@@ -14,10 +20,17 @@ all: fmt vet build
 
 # `build` is phony so `go build` runs unconditionally — Go's own build cache
 # decides what actually needs recompiling.
-build:
+build: proto
 	@mkdir -p $(BIN_DIR)
 	go build -o $(GLBX_BIN) ./cmd/glbx
 	go build -o $(STUB_BIN) ./cmd/exec_env_stub
+
+# Regenerate the signing protobuf bindings. protoc resolves protoc-gen-go from
+# $PATH and $(go env GOPATH)/bin.
+proto: $(SIGN_PB)
+$(SIGN_PB): $(SIGN_PROTO)
+	PATH="$$PATH:$$(go env GOPATH)/bin" \
+		protoc --go_out=. --go_opt=module=github.com/gardenlinux/glbx $(SIGN_PROTO)
 
 # Demo binaries are not needed for tests; build them on demand.
 build_demo:
@@ -47,4 +60,4 @@ doc:
 	mdbook build doc
 
 clean:
-	rm -rf $(BIN_DIR) doc/book
+	rm -rf $(BIN_DIR) doc/book $(SIGN_PB)

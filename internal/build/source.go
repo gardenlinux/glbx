@@ -3,6 +3,8 @@ package build
 import (
 	"bytes"
 	"compress/gzip"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -30,6 +32,13 @@ const sourceSeed = "2ddbb5227edeb4f7a1895e5fa18fd47b"
 // localVersionSuffix separates a package's base version from the content-derived
 // local-build suffix (base+gl~<srcHash[:8]>).
 const localVersionTag = "+gl~"
+
+// signingModuleSource / signingModuleBinary name the PKCS#11 forwarding module
+// package that a signing-enabled build implicitly depends on.
+const (
+	signingModuleSource = "glbx-pkcs11-forward"
+	signingModuleBinary = "glbx-pkcs11-forward"
+)
 
 // binaryResolver resolves a "<source>:<binary>" reference to the binary
 // artifact that produces it. The working-tree package set implements it; a
@@ -70,6 +79,9 @@ type DebianPkgBuild struct {
 	binaries     map[string]*debianBinaryPkg
 	pkgSet       binaryResolver
 	depsResolved bool
+	depsErr      error
+	signingKeys  []buildcfg.SigningKey
+	signingMnts  []signingMount
 }
 
 type DebianPkgBuildConfig struct {
@@ -163,6 +175,23 @@ func (s *DebianPkgBuild) resolveDeps() {
 		}
 		s.DepArtifacts = append(s.DepArtifacts, bp)
 	}
+
+	// A package that requests out-of-container signing gains the PKCS#11
+	// forwarding module as an implicit build dependency: it is installed into the
+	// chroot so the build's signing tooling can load it, and it participates in
+	// the build identity so toggling signing invalidates the cache. It is
+	// deliberately not listed in any depends/build-deps file — requesting signing
+	// is what pulls it in.
+	s.signingKeys = buildYML.Signing
+	if len(s.signingKeys) > 0 {
+		bp, err := s.pkgSet.Binary(signingModuleSource, signingModuleBinary)
+		if err != nil {
+			s.depsErr = fmt.Errorf("signing requested but package %q not found: %w",
+				signingModuleSource, err)
+			return
+		}
+		s.DepArtifacts = append(s.DepArtifacts, bp)
+	}
 }
 
 func (s *DebianPkgBuild) Inputs() []artifact.Input {
@@ -197,15 +226,46 @@ func (s *DebianPkgBuild) Identity() (objstore.Hash, error) {
 		parts = append(parts, id.String())
 	}
 
+	// A signing-enabled build folds each key's public certificate content into
+	// the identity, so changing a cert yields a distinct build. Appended only
+	// when signing is configured, in build.yml listing order, so non-signing
+	// packages hash exactly as before. The private key is never read.
+	s.resolveDeps()
+	for _, k := range s.signingKeys {
+		certHash, err := hashSigningCert(s.PkgDir, k.CertFile)
+		if err != nil {
+			return objstore.Hash{}, err
+		}
+		parts = append(parts, certHash)
+	}
+
 	hash := objstore.ConcatHash(parts...)
 	s.identity = hash
 	return hash, nil
+}
+
+// hashSigningCert returns the hex SHA-256 of a signing certificate's content.
+// certFile is resolved relative to the conf dir (the parent of pkgs/<name>),
+// matching where the signing service reads it.
+func hashSigningCert(pkgDir, certFile string) (string, error) {
+	confDir := filepath.Dir(filepath.Dir(pkgDir))
+	b, err := os.ReadFile(filepath.Join(confDir, certFile))
+	if err != nil {
+		return "", fmt.Errorf("read signing cert %s: %w", certFile, err)
+	}
+	sum := sha256.Sum256(b)
+	return hex.EncodeToString(sum[:]), nil
 }
 
 func (s *DebianPkgBuild) Build(ctx artifact.BuildContext) ([]artifact.Output, error) {
 	store := ctx.Store
 	l := log.From(ctx.Ctx, log.Build)
 	l.Info("building source package: %s", s.Name)
+
+	s.resolveDeps()
+	if s.depsErr != nil {
+		return nil, s.depsErr
+	}
 
 	lockfileIndex, err := s.loadLockfileIndex()
 	if err != nil {
@@ -235,6 +295,16 @@ func (s *DebianPkgBuild) Build(ctx artifact.BuildContext) ([]artifact.Output, er
 	if err != nil && !os.IsNotExist(err) {
 		return nil, fmt.Errorf("load sources.yml: %w", err)
 	}
+
+	// Signing services run here on the host and expose their sockets to the
+	// build; the private keys never enter the container. Started before the
+	// container is set up so the sockets exist to bind-mount in, stopped on
+	// cleanup.
+	stopSigning, err := s.setupSigning(ctx.Ctx)
+	if err != nil {
+		return nil, fmt.Errorf("setup signing: %w", err)
+	}
+	defer stopSigning()
 
 	cont, cleanup, err := s.setupBuildEnv(ctx.Ctx, store, chrootPkgs, refs)
 	if err != nil {

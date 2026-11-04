@@ -14,6 +14,7 @@
 - [Package building](./concepts/package-build.md)
 - [Image assembly](./concepts/image-assembly.md)
 - [The execution environment](./concepts/exec-env.md)
+- [Out-of-container signing](./concepts/out-of-container-signing.md)
 
 # Implementation
 
