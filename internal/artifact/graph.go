@@ -304,6 +304,53 @@ func (g *Graph) Len() int {
 	return len(g.nodes)
 }
 
+// Prune restricts the graph to the given node and its dependency closure
+// (everything reachable through deps and includes), dropping all other nodes.
+// It must be called after Build. Dependents of kept nodes that fall outside the
+// closure are removed from the kept nodes' rdeps so no dangling edges remain.
+// A target not in the graph is a no-op returning an error.
+func (g *Graph) Prune(targetKey string) error {
+	root, ok := g.nodeMap[targetKey]
+	if !ok {
+		return fmt.Errorf("prune target %s not in graph", targetKey)
+	}
+
+	keep := make(map[*node]bool)
+	var walk func(n *node)
+	walk = func(n *node) {
+		if keep[n] {
+			return
+		}
+		keep[n] = true
+		for _, d := range n.deps {
+			walk(d)
+		}
+		for _, inc := range n.includes {
+			walk(inc)
+		}
+	}
+	walk(root)
+
+	g.nodes = g.nodes[:0]
+	g.nodeMap = make(map[string]*node, len(keep))
+	for n := range keep {
+		g.nodes = append(g.nodes, n)
+		g.nodeMap[n.artifact.Key()] = n
+	}
+	// Drop rdeps that point outside the kept set so the engine's completion
+	// bookkeeping (which fans out to rdeps) stays within the pruned graph.
+	for _, n := range g.nodes {
+		kept := n.rdeps[:0]
+		for _, rd := range n.rdeps {
+			if keep[rd] {
+				kept = append(kept, rd)
+			}
+		}
+		n.rdeps = kept
+	}
+	return nil
+}
+
 // Find returns the artifact in the graph with the given Key(), or nil if no
 // such artifact exists.
 func (g *Graph) Find(key string) Artifact {

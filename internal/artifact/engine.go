@@ -65,6 +65,18 @@ func (e *Engine) SetScope(target string, noRecurse bool) {
 	e.noRecurse = noRecurse
 }
 
+// pruneToTarget restricts the built graph to the scoped target's dependency
+// closure, so a targeted build touches only the target and what it is built
+// from — never unrelated nodes that merely sit elsewhere in the graph. A no-op
+// when no target is scoped. Idempotent: pruning an already-pruned graph to the
+// same target leaves it unchanged.
+func (e *Engine) pruneToTarget() error {
+	if e.target == "" {
+		return nil
+	}
+	return e.graph.Prune(e.target)
+}
+
 // SetStream makes RunWithUI forward the target node's logs live to the console
 // rather than drive the interactive overview or the non-interactive dot viewer.
 // It reuses the per-task log buffer the UI already fills: a single log printer
@@ -103,6 +115,9 @@ func (e *Engine) Run(ctx context.Context) ([]BuildResult, error) {
 // reviewed afterward with `glbx build --view-logs --run <id>`.
 func (e *Engine) RunWithUI(ctx context.Context) ([]BuildResult, error) {
 	if err := e.graph.Build(); err != nil {
+		return nil, err
+	}
+	if err := e.pruneToTarget(); err != nil {
 		return nil, err
 	}
 	if len(e.graph.nodes) == 0 {
@@ -280,6 +295,9 @@ func (e *Engine) storeRun(runID string, tracker *taskui.TaskTracker) error {
 // hooks. Both Run and RunWithUI delegate here.
 func (e *Engine) run(ctx context.Context, hooks runHooks) ([]BuildResult, error) {
 	if err := e.graph.Build(); err != nil {
+		return nil, err
+	}
+	if err := e.pruneToTarget(); err != nil {
 		return nil, err
 	}
 	if len(e.graph.nodes) == 0 {
