@@ -216,7 +216,11 @@ container. An image type bundles two things: a declaration of the assembly tools
 its container needs, and an executable `build` script that turns a rootfs into a
 disk image. The script's contract is deliberately tiny — it is handed the rootfs
 tarball as its first argument and an output path as its second, and it writes a
-disk image to that path and exits. It runs with the capability to mount a tmpfs
+disk image to that path and exits. The image's identity is passed in the
+environment as `GLBX_IMAGE_ID`, so the script can derive every on-disk
+identifier a tool would otherwise randomize — filesystem, partition and disk
+UUIDs, hash seeds — deterministically from it rather than from `/dev/urandom`.
+It runs with the capability to mount a tmpfs
 but is handed no loop device, so a type populates a filesystem from a directory
 tree rather than by mounting one. glbx stores whatever bytes the script writes
 and content-addresses them, exactly as it does the rootfs tarball. A single
