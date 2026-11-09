@@ -8,13 +8,13 @@ only on the foundations — the build engine and sandbox layer on top of them.
 
 Import and lockfile generation are pluggable operations. Each is implemented by
 a provider registered under a namespace string (`debian`, `rootfs`, `pkg`,
-`debian-kernel`); the command layer parses a `<namespace>:<arg>` target, selects
-the provider, and hands it an `OpContext` (the logger-bearing context, the
-object store, the working-tree root, and a validated parameter set) and the
-target's single argument. Provider-specific options arrive on one opaque
-`--params key=val,...` channel; each provider validates the set it receives,
-rejecting unknown keys, and advertises what it accepts as a free-form
-`ParamsHelp` string.
+`debian-kernel`, `tooling-debian`, `tooling-pkg`, `image-type`); the command
+layer parses a `<namespace>:<arg>` target, selects the provider, and hands it an
+`OpContext` (the logger-bearing context, the object store, the working-tree
+root, and a validated parameter set) and the target's single argument.
+Provider-specific options arrive on one opaque `--params key=val,...` channel;
+each provider validates the set it receives, rejecting unknown keys, and
+advertises what it accepts as a free-form `ParamsHelp` string.
 
 Unlike an artifact build — cache blobs in, cache blobs out — an import or
 lockfile operation reads and writes the configuration tree (`pkgs/<name>/...`,
@@ -58,6 +58,23 @@ The concrete providers:
   Debian or the kernel special case. Its `ParamsHelp` composes its delegates'
   help under each `pkg_type` heading. A `pkg_type` is required; the forwarder
   errors when it is absent.
+- **`tooling-debian`** — the Debian importer, routed into the assembly-tooling
+  universe. It wraps the same import pipeline as `debian` but writes
+  `images.d/tooling/<name>/` and records that lineage independently, so a
+  `pkgs/` import and a tooling import of the same upstream name are two
+  coexisting packages. It scaffolds the reduced tooling schema.
+- **`tooling-pkg`** — the build-tooling lock for an assembly-tool package,
+  rooted at `images.d/tooling/<name>/`. It is the same resolution `debian` runs
+  and writes `build-deps.yml`, but validates the reduced schema (no
+  `runtime_depends`, `lockfile_deps`, or `signing`) after loading `build.yml`.
+- **`image-type`** — an image type's assembly-tooling lock. It reads
+  `images.d/<name>/conf.yml`, resolves the Essential floor (plus `perl-base` and
+  `mawk`) together with the runtime closure of every `debian_tooling` name, and
+  writes `images.d/<name>/tooling-deps.yml` in the same explicit form as
+  `build-deps.yml`. `local_tooling` is not pinned here — those are graph edges
+  resolved through the build. It is a separate step from `rootfs`: rootfs
+  *configuration* tooling and image *assembly* tooling are distinct, with
+  distinct namespaces and output files.
 
 A single `debianRepoConfig` helper validates and defaults the shared
 Debian-family parameters (`repo`, `dist`, `snapshot`, `arch`, `cookie`,
@@ -95,7 +112,9 @@ read the package's declared build dependencies, resolve the closure, fetch and
 hash-verify every resolved `.deb` into the store (16 in parallel), and write the
 explicit per-architecture `build-deps.yml` — each tool recorded by name, exact
 version, and per file its architecture, content hash, and retrieval URLs.
-`GenerateRootfs` produces the image configuration-tooling lock in the same form.
+`GenerateRootfs` produces the image configuration-tooling lock, and
+`GenerateImageType` an image type's assembly-tooling lock, both in the same form
+— each appends its own resolver roots to a shared essential floor.
 
 ## `internal/restore`
 

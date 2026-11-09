@@ -1,0 +1,22 @@
+#!/bin/sh
+# plain-ext4 assembly script.
+#   $1  path to the rootfs tarball (read-only)
+#   $2  path to write the finished ext4 disk image to
+#
+# No loop device is available, so the filesystem is populated directly from an
+# extracted directory tree with `mke2fs -d`, which needs no mount.
+set -eu
+
+rootfs_tar="$1"
+out="$2"
+
+workdir="$(mktemp -d)"
+tar -xf "$rootfs_tar" -C "$workdir"
+
+# Size the image to the extracted tree plus generous slack, rounded to MiB.
+used_kib="$(du -sk "$workdir" | cut -f1)"
+size_mib=$(( (used_kib / 1024) + 64 ))
+
+mke2fs -q -F -t ext4 -d "$workdir" "$out" "${size_mib}M"
+
+rm -rf "$workdir"

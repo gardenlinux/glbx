@@ -151,5 +151,64 @@ else
 	git_commit "configure rootfs images" rootfs-deps.yml rootfs-*.yml
 fi
 
+echo "=== Image layer ==="
+if [ -d "$TEMPLATES_DIR/images.d" ] || [ -f "$TEMPLATES_DIR/images.yml" ]; then
+	# Lay down the spec list and the image-assembly tree (type conf.yml +
+	# build script, and any tooling packages).
+	[ -f "$TEMPLATES_DIR/images.yml" ] && cp "$TEMPLATES_DIR/images.yml" "$CONF_DIR/images.yml"
+	if [ -d "$TEMPLATES_DIR/images.d" ]; then
+		mkdir -p "$CONF_DIR/images.d"
+		# Copy each image type's hand-authored files (conf.yml + build script);
+		# the generated tooling-deps.yml is produced below.
+		for tdir in "$TEMPLATES_DIR/images.d"/*/; do
+			[ -d "$tdir" ] || continue
+			tname="$(basename "$tdir")"
+			[ "$tname" = "tooling" ] && continue
+			mkdir -p "$CONF_DIR/images.d/$tname"
+			[ -f "$tdir/conf.yml" ] && cp "$tdir/conf.yml" "$CONF_DIR/images.d/$tname/conf.yml"
+			[ -f "$tdir/build" ] && cp "$tdir/build" "$CONF_DIR/images.d/$tname/build"
+		done
+	fi
+
+	# Import any tooling packages (none yet). Each is imported into the same
+	# $CONF_DIR; the tooling-debian namespace routes it to images.d/tooling/.
+	if [ -d "$TEMPLATES_DIR/images.d/tooling" ]; then
+		for tdir in "$TEMPLATES_DIR/images.d/tooling"/*/; do
+			[ -f "$tdir/build.yml" ] || continue
+			tpkg="$(basename "$tdir")"
+			if [ -d "$CONF_DIR/images.d/tooling/$tpkg/src" ]; then
+				echo "tooling $tpkg: already imported"
+			else
+				echo "Importing tooling $tpkg..."
+				"$GLBX" import "${CACHE_ARGS[@]}" --params "cookie=$COOKIE,no-verify=true" --output "$CONF_DIR" "tooling-debian:$tpkg" \
+					|| { echo "FAIL: import tooling $tpkg"; exit 1; }
+			fi
+			cp "$tdir/build.yml" "$CONF_DIR/images.d/tooling/$tpkg/build.yml"
+			if [ ! -f "$CONF_DIR/images.d/tooling/$tpkg/build-deps.yml" ]; then
+				echo "Generating tooling lockfile for $tpkg..."
+				"$GLBX" lockfile "${CACHE_ARGS[@]}" --params "cookie=$COOKIE" --stub "$STUB" --output "$CONF_DIR" "tooling-pkg:$tpkg" \
+					|| { echo "FAIL: lockfile tooling $tpkg"; exit 1; }
+			fi
+			git_commit "configure $tpkg tooling build" "images.d/tooling/$tpkg"
+		done
+	fi
+
+	# Generate each image type's assembly-tooling lock.
+	for tdir in "$CONF_DIR/images.d"/*/; do
+		[ -d "$tdir" ] || continue
+		tname="$(basename "$tdir")"
+		[ "$tname" = "tooling" ] && continue
+		[ -f "$tdir/conf.yml" ] || continue
+		if [ -f "$tdir/tooling-deps.yml" ]; then
+			echo "image type $tname: lockfile exists"
+			continue
+		fi
+		echo "Generating image-type lockfile for $tname..."
+		"$GLBX" lockfile "${CACHE_ARGS[@]}" --params "cookie=$COOKIE" --stub "$STUB" --output "$CONF_DIR" "image-type:$tname" \
+			|| { echo "FAIL: lockfile image-type $tname"; exit 1; }
+	done
+	git_commit "configure image types" images.yml images.d
+fi
+
 echo "=== Staging prepared: $CONF_DIR ==="
 echo "Build with: $GLBX build --conf-dir $CONF_DIR --stub $STUB"

@@ -127,16 +127,19 @@ type GraphConfig struct {
 	ScratchDir string
 }
 
-// GraphResult holds the constructed artifact graph and its rootfs variants.
+// GraphResult holds the constructed artifact graph and its top-level nodes.
 type GraphResult struct {
 	Graph  *artifact.Graph
 	Rootfs []*Rootfs
+	Images []*Image
 }
 
-// BuildGraph constructs the full artifact graph. It creates a PackageSet, then
-// one Rootfs artifact per rootfs-<label>.yml variant (each reading its own
-// package list), and lets Discover() walk the dependency chains to build the
-// graph. Variants that share dependencies share the single node for each.
+// BuildGraph constructs the full artifact graph. It creates a PackageSet and a
+// ToolingSet, then one Rootfs artifact per rootfs-<label>.yml variant and one
+// Image per images.yml entry, and lets Discover() walk the dependency chains to
+// build the graph. Variants that share dependencies share the single node for
+// each. When images.yml is present the roots are every image and every rootfs
+// variant; absent, the roots are the rootfs variants exactly as before.
 func BuildGraph(cfg GraphConfig) (*GraphResult, error) {
 	pkgsDir := filepath.Join(cfg.ConfDir, "pkgs")
 	ps, err := NewPackageSet(pkgsDir, cfg.Arch, cfg.Store, cfg.StubPath, cfg.ScratchDir)
@@ -148,12 +151,19 @@ func BuildGraph(cfg GraphConfig) (*GraphResult, error) {
 		return nil, fmt.Errorf("no packages found in %s", pkgsDir)
 	}
 
+	toolingDir := filepath.Join(cfg.ConfDir, "images.d", "tooling")
+	ts, err := NewToolingSet(toolingDir, cfg.Arch, cfg.Store, cfg.StubPath, cfg.ScratchDir)
+	if err != nil {
+		return nil, err
+	}
+
 	labels := buildcfg.DiscoverRootfsLabels(cfg.ConfDir)
 	if len(labels) == 0 {
 		return nil, fmt.Errorf("no rootfs-<label>.yml variants found in %s", cfg.ConfDir)
 	}
 
 	var rootfsList []*Rootfs
+	rootfsByLabel := make(map[string]*Rootfs, len(labels))
 	roots := make([]artifact.Artifact, 0, len(labels))
 	for _, label := range labels {
 		rootfs, err := NewRootfs(RootfsConfig{
@@ -168,7 +178,16 @@ func BuildGraph(cfg GraphConfig) (*GraphResult, error) {
 			return nil, fmt.Errorf("create rootfs artifact: %w", err)
 		}
 		rootfsList = append(rootfsList, rootfs)
+		rootfsByLabel[label] = rootfs
 		roots = append(roots, rootfs)
+	}
+
+	images, err := buildImages(cfg, ts, rootfsByLabel)
+	if err != nil {
+		return nil, err
+	}
+	for _, im := range images {
+		roots = append(roots, im)
 	}
 
 	graph, err := artifact.Discover(roots)
@@ -179,7 +198,52 @@ func BuildGraph(cfg GraphConfig) (*GraphResult, error) {
 	return &GraphResult{
 		Graph:  graph,
 		Rootfs: rootfsList,
+		Images: images,
 	}, nil
+}
+
+// buildImages constructs one Image per images.yml entry, resolving its rootfs
+// variant by label and its local_tooling references through the ToolingSet. A
+// missing images.yml yields no images (and no error) — the config repo has no
+// image layer.
+func buildImages(cfg GraphConfig, ts *ToolingSet, rootfsByLabel map[string]*Rootfs) ([]*Image, error) {
+	specs, err := buildcfg.LoadImages(cfg.ConfDir)
+	if err != nil {
+		return nil, fmt.Errorf("load images.yml: %w", err)
+	}
+	var images []*Image
+	for _, spec := range specs {
+		rootfs, ok := rootfsByLabel[spec.Rootfs]
+		if !ok {
+			return nil, fmt.Errorf("images.yml: image %q names rootfs %q with no rootfs-%s.yml variant", spec.Name, spec.Rootfs, spec.Rootfs)
+		}
+		typeDir := filepath.Join(cfg.ConfDir, "images.d", spec.Type)
+		conf, err := buildcfg.LoadImageTypeConf(typeDir)
+		if err != nil {
+			return nil, fmt.Errorf("images.yml: image %q type %q: %w", spec.Name, spec.Type, err)
+		}
+		var local []localToolingRef
+		for _, ref := range conf.LocalTooling {
+			src, bin, _ := strings.Cut(ref, ":")
+			build, output, err := ts.ToolingBinary(src, bin)
+			if err != nil {
+				return nil, fmt.Errorf("images.yml: image %q type %q local_tooling %q: %w", spec.Name, spec.Type, ref, err)
+			}
+			local = append(local, localToolingRef{build: build, output: output})
+		}
+		images = append(images, newImage(ImageConfig{
+			Name:     spec.Name,
+			Arch:     cfg.Arch,
+			TypeDir:  typeDir,
+			Rootfs:   rootfs,
+			Conf:     conf,
+			Local:    local,
+			BaseDir:  cfg.ConfDir,
+			Store:    cfg.Store,
+			StubPath: cfg.StubPath,
+		}))
+	}
+	return images, nil
 }
 
 // BuiltOutputs walks the graph and, for each node that has already been built,

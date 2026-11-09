@@ -1,0 +1,5 @@
+# plain-ext4 assembles the rootfs tarball into a single unpartitioned ext4
+# filesystem image. It needs only the e2fsprogs assembly tool on top of the
+# essential base.
+debian_tooling:
+  - e2fsprogs

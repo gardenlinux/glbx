@@ -32,7 +32,7 @@ store meet.
   dpkg database so dpkg forgets the base while its files remain, then install
   the binary and its local closure so dpkg configures only our packages — and
   re-emits the validated `.deb`.
-- **Image** (`Rootfs`): one artifact per `rootfs-<label>.yml` variant in the
+- **Rootfs** (`Rootfs`): one artifact per `rootfs-<label>.yml` variant in the
   working tree, keyed `rootfs:<label>:<arch>`. Its identity folds the label, the
   architecture, every transitive binary dependency, and the pinned image-tooling
   hashes. Its build action narrows the runtime closure to that variant's shipping
@@ -44,10 +44,38 @@ store meet.
   deterministic `tar.gz`. The image-configuration tooling lock (`rootfs-deps.yml`)
   is shared by every variant: it is the throwaway Layer 1, never shipped, so it
   does not depend on which packages a variant ships.
+- **Tooling build** (`ToolingPkgBuild`): an image-assembly tool's source build,
+  keyed `tooling-pkg-build:<source>:<arch>` — a distinct key namespace and a
+  distinct identity seed from `DebianPkgBuild`, so a same-named shipped source
+  build and tooling build never collide on key or identity. It reuses the source
+  build's chroot-assembly, changelog-stamp, and output-collection phases
+  verbatim, but has no binary-validation layer: its build dependencies resolve
+  only among other tooling builds (`ToolingSet`), its produced `.deb`s are its
+  outputs, and those are consumed directly at image assembly. Its identity folds
+  the tooling seed, the source dirhash, the architecture, and each tooling build
+  dependency's identity.
+- **Image** (`Image`): the disk-image artifact and the top of the graph, keyed
+  `image:<name>:<arch>`, one per `images.yml` entry. Its identity folds the image
+  seed, the name and architecture, the rootfs node's identity, the assembly
+  script bytes, the `conf.yml` bytes, every pinned assembly-tooling file hash, and
+  each local-tooling build's identity — so a change to the rootfs, the script, the
+  tool set, or a local tool rebuilds it. Its Depends are the one `Rootfs` node and
+  each local-tooling `ToolingPkgBuild` (the only cross-universe edges). Its build
+  action raw-extracts the pinned assembly tooling into a container root, overlays
+  each local-tooling `.deb` on top (local overrides mirror), stages the rootfs
+  tarball read-only and the assembly script, runs the script by its shebang with
+  `CAP_SYS_ADMIN` and no loop device (`$1` the rootfs, `$2` the output path), and
+  harvests the written image from the staging mount namespace into the store
+  under the single output name `image`.
 
-`PackageSet` scans the working tree and resolves `<source>:<binary>` references;
-`BuildGraph` builds one `Rootfs` per variant and lets discovery walk their
-(shared) dependency closures into a single graph.
+`PackageSet` scans the working tree and resolves shipped `<source>:<binary>`
+references; `ToolingSet` does the same over `images.d/tooling/` for the assembly
+universe, resolving tooling references only among tooling builds. `BuildGraph`
+builds one `Rootfs` per variant and one `Image` per `images.yml` entry and lets
+discovery walk their (shared) dependency closures into a single graph; with
+`images.yml` present the roots are every image and every rootfs variant, so a
+plain build builds them all, and absent it the roots are the rootfs variants
+exactly as before.
 
 - **Signing** (`signing.go` + `internal/signing`): when a source build's
   `build.yml` carries a `signing` block, the build starts a host-side signing
