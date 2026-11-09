@@ -171,8 +171,9 @@ func download(client *http.Client, url string, store *objstore.Store, want objst
 }
 
 // collectItems reads every pin in the working tree into a deduplicated restore
-// set: each package's source archives and arch-matching build-tooling .debs, plus
-// the image configuration tooling from the root rootfs-deps.yml.
+// set: each shipped and tooling package's source archives and arch-matching
+// build-tooling .debs, plus the rootfs configuration tooling and every image
+// type's assembly tooling.
 func collectItems(confRoot, arch string) ([]item, error) {
 	seen := make(map[string]struct{})
 	var items []item
@@ -184,6 +185,40 @@ func collectItems(confRoot, arch string) ([]item, error) {
 		items = append(items, item{hash: h, urls: urls, label: label})
 	}
 
+	// Collect one package subtree's pins: its source archives and arch-matching
+	// build-tooling .debs. Used for both pkgs/ and images.d/tooling/.
+	collectPkg := func(pkgDir, label string) error {
+		sources, err := buildcfg.LoadSourcesYML(pkgDir)
+		if err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("restore: %s/sources.yml: %w", label, err)
+		}
+		for _, s := range sources {
+			add(s.Hash, s.URLs, fmt.Sprintf("%s source %s", label, s.File))
+		}
+		depsPath := filepath.Join(pkgDir, "build-deps.yml")
+		if deps, err := buildcfg.LoadBuildDeps(depsPath); err == nil {
+			for _, f := range buildcfg.FilesForArch(deps, arch) {
+				add(f.Hash, f.URLs, fmt.Sprintf("%s build-dep", label))
+			}
+		} else if !os.IsNotExist(err) {
+			return fmt.Errorf("restore: %s/build-deps.yml: %w", label, err)
+		}
+		return nil
+	}
+
+	// Collect an explicit tooling lock (rootfs-deps.yml / tooling-deps.yml form).
+	collectLock := func(path, label string) error {
+		if deps, err := buildcfg.LoadBuildDeps(path); err == nil {
+			for _, f := range buildcfg.FilesForArch(deps, arch) {
+				add(f.Hash, f.URLs, label)
+			}
+		} else if !os.IsNotExist(err) {
+			return fmt.Errorf("restore: %s: %w", label, err)
+		}
+		return nil
+	}
+
+	// Shipped packages.
 	pkgsDir := filepath.Join(confRoot, "pkgs")
 	entries, err := os.ReadDir(pkgsDir)
 	if err != nil {
@@ -193,33 +228,39 @@ func collectItems(confRoot, arch string) ([]item, error) {
 		if !e.IsDir() {
 			continue
 		}
-		pkgDir := filepath.Join(pkgsDir, e.Name())
-
-		sources, err := buildcfg.LoadSourcesYML(pkgDir)
-		if err != nil && !os.IsNotExist(err) {
-			return nil, fmt.Errorf("restore: %s/sources.yml: %w", e.Name(), err)
-		}
-		for _, s := range sources {
-			add(s.Hash, s.URLs, fmt.Sprintf("%s source %s", e.Name(), s.File))
-		}
-
-		depsPath := filepath.Join(pkgDir, "build-deps.yml")
-		if deps, err := buildcfg.LoadBuildDeps(depsPath); err == nil {
-			for _, f := range buildcfg.FilesForArch(deps, arch) {
-				add(f.Hash, f.URLs, fmt.Sprintf("%s build-dep", e.Name()))
-			}
-		} else if !os.IsNotExist(err) {
-			return nil, fmt.Errorf("restore: %s/build-deps.yml: %w", e.Name(), err)
+		if err := collectPkg(filepath.Join(pkgsDir, e.Name()), e.Name()); err != nil {
+			return nil, err
 		}
 	}
 
-	rootfsPath := filepath.Join(confRoot, "rootfs-deps.yml")
-	if deps, err := buildcfg.LoadBuildDeps(rootfsPath); err == nil {
-		for _, f := range buildcfg.FilesForArch(deps, arch) {
-			add(f.Hash, f.URLs, "rootfs-dep")
+	// The rootfs configuration tooling.
+	if err := collectLock(filepath.Join(confRoot, "rootfs-deps.yml"), "rootfs-dep"); err != nil {
+		return nil, err
+	}
+
+	// Image-assembly tooling packages (same subtree shape as pkgs/). The
+	// directory is optional — a config repo may have no image layer.
+	toolingDir := filepath.Join(confRoot, "images.d", "tooling")
+	if toolingEntries, err := os.ReadDir(toolingDir); err == nil {
+		for _, e := range toolingEntries {
+			if !e.IsDir() {
+				continue
+			}
+			label := "tooling/" + e.Name()
+			if err := collectPkg(filepath.Join(toolingDir, e.Name()), label); err != nil {
+				return nil, err
+			}
 		}
 	} else if !os.IsNotExist(err) {
-		return nil, fmt.Errorf("restore: rootfs-deps.yml: %w", err)
+		return nil, fmt.Errorf("restore: reading %s: %w", toolingDir, err)
+	}
+
+	// Each image type's assembly-tooling lock.
+	for _, t := range buildcfg.DiscoverImageTypes(confRoot) {
+		lock := filepath.Join(confRoot, "images.d", t, "tooling-deps.yml")
+		if err := collectLock(lock, "image-type/"+t); err != nil {
+			return nil, err
+		}
 	}
 
 	return items, nil
