@@ -139,11 +139,16 @@ done
 if [ -f "$CONF_DIR/rootfs-deps.yml" ]; then
 	echo "rootfs lockfile exists"
 else
-	[ -f "$TEMPLATES_DIR/rootfs.yml" ] && cp "$TEMPLATES_DIR/rootfs.yml" "$CONF_DIR/rootfs.yml"
+	for variant in "$TEMPLATES_DIR"/rootfs-*.yml; do
+		[ -e "$variant" ] || continue
+		base="$(basename "$variant")"
+		[ "$base" = "rootfs-deps.yml" ] && continue
+		cp "$variant" "$CONF_DIR/$base"
+	done
 	echo "Generating rootfs lockfile..."
 	"$GLBX" lockfile "${CACHE_ARGS[@]}" --params "cookie=$COOKIE" --stub "$STUB" --output "$CONF_DIR" rootfs \
 		|| { echo "FAIL: lockfile rootfs"; exit 1; }
-	git_commit "configure rootfs image" rootfs.yml rootfs-deps.yml
+	git_commit "configure rootfs images" rootfs-deps.yml rootfs-*.yml
 fi
 
 echo "=== Staging prepared: $CONF_DIR ==="

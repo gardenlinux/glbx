@@ -166,7 +166,7 @@ func TestFetchItemAlreadyCached(t *testing.T) {
 func TestCollectItemsDedupesAndArchFilters(t *testing.T) {
 	root := t.TempDir()
 	writeTree(t, root, map[string]string{
-		"rootfs.yml": "packages: [dpkg]\n",
+		"rootfs-base.yml": "packages: [dpkg]\n",
 		"pkgs/foo/sources.yml": `sources:
   - file: foo_1.0.orig.tar.gz
     sha256: ` + hex64('a') + `
@@ -242,7 +242,7 @@ func TestRestoreEndToEnd(t *testing.T) {
 
 	root := t.TempDir()
 	writeTree(t, root, map[string]string{
-		"rootfs.yml": "packages: []\n",
+		"rootfs-base.yml": "packages: []\n",
 		"pkgs/foo/sources.yml": `sources:
   - file: foo.orig.tar.gz
     sha256: ` + sourceHash.String() + `

@@ -213,31 +213,43 @@ func TestLoadBuildDeps_InvalidHash(t *testing.T) {
 	}
 }
 
-func TestLoadRootfsYML(t *testing.T) {
+func TestLoadRootfsLabel(t *testing.T) {
 	dir := t.TempDir()
-	writeFile(t, filepath.Join(dir, "rootfs.yml"), `packages: [base-files:base-files, bash:bash, coreutils:coreutils]
+	writeFile(t, filepath.Join(dir, "rootfs-base.yml"), `packages: [base-files:base-files, bash:bash, coreutils:coreutils]
 `)
-	pkgs := LoadRootfsYML(dir)
+	pkgs := LoadRootfsLabel(dir, "base")
 	if len(pkgs) != 3 || pkgs[0] != "base-files:base-files" || pkgs[2] != "coreutils:coreutils" {
 		t.Fatalf("unexpected packages: %v", pkgs)
 	}
 }
 
-func TestLoadRootfsYML_BlockList(t *testing.T) {
+func TestLoadRootfsLabel_BlockList(t *testing.T) {
 	dir := t.TempDir()
-	writeFile(t, filepath.Join(dir, "rootfs.yml"), `packages:
+	writeFile(t, filepath.Join(dir, "rootfs-min.yml"), `packages:
   - base-files:base-files
   - bash:bash
 `)
-	pkgs := LoadRootfsYML(dir)
+	pkgs := LoadRootfsLabel(dir, "min")
 	if len(pkgs) != 2 {
 		t.Fatalf("expected 2 packages, got %d: %v", len(pkgs), pkgs)
 	}
 }
 
-func TestLoadRootfsYML_MissingTolerated(t *testing.T) {
-	if pkgs := LoadRootfsYML(t.TempDir()); pkgs != nil {
-		t.Fatalf("expected nil on missing rootfs.yml, got %v", pkgs)
+func TestLoadRootfsLabel_MissingTolerated(t *testing.T) {
+	if pkgs := LoadRootfsLabel(t.TempDir(), "base"); pkgs != nil {
+		t.Fatalf("expected nil on missing rootfs-base.yml, got %v", pkgs)
+	}
+}
+
+func TestDiscoverRootfsLabels(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "rootfs-base.yml"), "packages: [bash:bash]\n")
+	writeFile(t, filepath.Join(dir, "rootfs-min.yml"), "packages: [bash:bash]\n")
+	// rootfs-deps.yml is the shared tooling lock, not a variant, and is excluded.
+	writeFile(t, filepath.Join(dir, "rootfs-deps.yml"), "tools: []\n")
+	labels := DiscoverRootfsLabels(dir)
+	if len(labels) != 2 || labels[0] != "base" || labels[1] != "min" {
+		t.Fatalf("unexpected labels (want [base min]): %v", labels)
 	}
 }
 

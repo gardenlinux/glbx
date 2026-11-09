@@ -62,7 +62,10 @@ func TestImageBuildE2E(t *testing.T) {
 		t.Skipf("lockfile (network required): %v", err)
 	}
 
-	os.WriteFile(filepath.Join(work, "rootfs.yml"), []byte("packages:\n  - glbxtest:glbxtest\n"), 0644)
+	os.WriteFile(filepath.Join(work, "rootfs-base.yml"), []byte("packages:\n  - glbxtest:glbxtest\n"), 0644)
+	// A second variant sharing the same (single) package exercises multi-root
+	// discovery: two rootfs nodes over one dependency closure.
+	os.WriteFile(filepath.Join(work, "rootfs-min.yml"), []byte("packages:\n  - glbxtest:glbxtest\n"), 0644)
 	if _, err := lockfile.GenerateRootfs(lockfile.RootfsConfig{Ctx: ctx, Store: store, Arch: arch, OutputDir: work, Cookie: cookie}); err != nil {
 		t.Skipf("rootfs lockfile (network required): %v", err)
 	}
@@ -70,6 +73,9 @@ func TestImageBuildE2E(t *testing.T) {
 	gr, err := BuildGraph(GraphConfig{ConfDir: work, Arch: arch, Store: store, StubPath: stub})
 	if err != nil {
 		t.Fatalf("build graph: %v", err)
+	}
+	if len(gr.Rootfs) != 2 {
+		t.Fatalf("expected 2 rootfs variants, got %d", len(gr.Rootfs))
 	}
 	eng := artifact.NewEngine(gr.Graph, store, 2)
 	results, err := eng.Run(ctx)
@@ -82,17 +88,29 @@ func TestImageBuildE2E(t *testing.T) {
 		}
 	}
 
-	manifest, leaves, err := gr.Rootfs.OutputRefs(store)
-	if err != nil {
-		t.Fatalf("rootfs not recorded: %v", err)
+	// Both variants must record outputs; their identities are distinct because
+	// the label is folded into the rootfs identity even when the closure matches.
+	ids := make(map[string]bool)
+	for _, rootfs := range gr.Rootfs {
+		manifest, leaves, err := rootfs.OutputRefs(store)
+		if err != nil {
+			t.Fatalf("%s not recorded: %v", rootfs.Key(), err)
+		}
+		if manifest.IsZero() || len(leaves) == 0 {
+			t.Fatalf("%s: no image outputs: manifest=%s leaves=%d", rootfs.Key(), manifest, len(leaves))
+		}
+		id, err := rootfs.Identity()
+		if err != nil {
+			t.Fatalf("%s identity: %v", rootfs.Key(), err)
+		}
+		ids[id.String()] = true
+		// The /pkgs staging area used to bind-mount local .debs for dpkg must not
+		// survive into the packed image.
+		assertNoPkgsStaging(t, store, leaves[0])
 	}
-	if manifest.IsZero() || len(leaves) == 0 {
-		t.Fatalf("no image outputs: manifest=%s leaves=%d", manifest, len(leaves))
+	if len(ids) != 2 {
+		t.Fatalf("expected 2 distinct rootfs identities, got %d", len(ids))
 	}
-
-	// The /pkgs staging area used to bind-mount local .debs for dpkg must not
-	// survive into the packed image.
-	assertNoPkgsStaging(t, store, leaves[0])
 }
 
 // assertNoPkgsStaging fails if the packed rootfs tar contains a top-level pkgs/

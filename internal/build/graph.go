@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/gardenlinux/glbx/internal/artifact"
+	"github.com/gardenlinux/glbx/internal/buildcfg"
 	"github.com/gardenlinux/glbx/internal/objstore"
 )
 
@@ -126,15 +127,16 @@ type GraphConfig struct {
 	ScratchDir string
 }
 
-// GraphResult holds the constructed artifact graph and its components.
+// GraphResult holds the constructed artifact graph and its rootfs variants.
 type GraphResult struct {
 	Graph  *artifact.Graph
-	Rootfs *Rootfs
+	Rootfs []*Rootfs
 }
 
-// BuildGraph constructs the full artifact graph. It creates a PackageSet,
-// creates the Rootfs artifact (which reads rootfs.yml), and lets Discover()
-// walk the dependency chain to build the graph.
+// BuildGraph constructs the full artifact graph. It creates a PackageSet, then
+// one Rootfs artifact per rootfs-<label>.yml variant (each reading its own
+// package list), and lets Discover() walk the dependency chains to build the
+// graph. Variants that share dependencies share the single node for each.
 func BuildGraph(cfg GraphConfig) (*GraphResult, error) {
 	pkgsDir := filepath.Join(cfg.ConfDir, "pkgs")
 	ps, err := NewPackageSet(pkgsDir, cfg.Arch, cfg.Store, cfg.StubPath, cfg.ScratchDir)
@@ -146,25 +148,37 @@ func BuildGraph(cfg GraphConfig) (*GraphResult, error) {
 		return nil, fmt.Errorf("no packages found in %s", pkgsDir)
 	}
 
-	rootfs, err := NewRootfs(RootfsConfig{
-		Arch:     cfg.Arch,
-		Store:    cfg.Store,
-		PkgSet:   ps,
-		BaseDir:  cfg.ConfDir,
-		StubPath: cfg.StubPath,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("create rootfs artifact: %w", err)
+	labels := buildcfg.DiscoverRootfsLabels(cfg.ConfDir)
+	if len(labels) == 0 {
+		return nil, fmt.Errorf("no rootfs-<label>.yml variants found in %s", cfg.ConfDir)
 	}
 
-	graph, err := artifact.Discover([]artifact.Artifact{rootfs})
+	var rootfsList []*Rootfs
+	roots := make([]artifact.Artifact, 0, len(labels))
+	for _, label := range labels {
+		rootfs, err := NewRootfs(RootfsConfig{
+			Label:    label,
+			Arch:     cfg.Arch,
+			Store:    cfg.Store,
+			PkgSet:   ps,
+			BaseDir:  cfg.ConfDir,
+			StubPath: cfg.StubPath,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("create rootfs artifact: %w", err)
+		}
+		rootfsList = append(rootfsList, rootfs)
+		roots = append(roots, rootfs)
+	}
+
+	graph, err := artifact.Discover(roots)
 	if err != nil {
 		return nil, fmt.Errorf("discover graph: %w", err)
 	}
 
 	return &GraphResult{
 		Graph:  graph,
-		Rootfs: rootfs,
+		Rootfs: rootfsList,
 	}, nil
 }
 

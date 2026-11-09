@@ -33,11 +33,11 @@ func cmdBuild(args []string) error {
 	cacheDir := fs.String("cache", "", "cache directory")
 	confDir := fs.String("conf-dir", "", "configuration directory")
 	stubPath := fs.String("stub", "", "path to exec_env_stub binary")
-	invalidate := fs.String("invalidate", "", "delete the map entry for the target with this Key (e.g. rootfs:amd64) and exit")
-	printID := fs.String("print-id", "", "print the identity (map key) of the target with this Key (e.g. rootfs:amd64) and exit")
-	listOutputs := fs.String("list-outputs", "", "print the output names of the already-built target with this Key (e.g. rootfs:amd64) and exit")
+	invalidate := fs.String("invalidate", "", "delete the map entry for the target with this Key (e.g. rootfs:base:amd64) and exit")
+	printID := fs.String("print-id", "", "print the identity (map key) of the target with this Key (e.g. rootfs:base:amd64) and exit")
+	listOutputs := fs.String("list-outputs", "", "print the output names of the already-built target with this Key (e.g. rootfs:base:amd64) and exit")
 	outputPath := fs.String("output-path", "", "print the cache path of one named output of the already-built target with this Key; the output name is a positional argument")
-	target := fs.String("target", "", "build only the node with this Key (e.g. rootfs:amd64); other nodes must resolve from cache")
+	target := fs.String("target", "", "build only the node with this Key (e.g. rootfs:base:amd64); other nodes must resolve from cache")
 	noRecurse := fs.Bool("no-recurse", false, "require every non-target node to resolve from cache; a miss is a hard error")
 	stream := fs.Bool("stream", false, "forward the target's logs live to the console instead of the task UI (requires --target and --no-recurse)")
 	// --check-reproducible and --view-logs are modes dispatched above, before this
@@ -204,9 +204,13 @@ func cmdBuild(args []string) error {
 		}
 	}
 
-	rootfsID, err := graphResult.Rootfs.Identity()
-	if err == nil {
-		l.Info("rootfs identity: %s", rootfsID)
+	// Print each rootfs variant's identity — the handle exec-chroot consumes.
+	for _, rootfs := range graphResult.Rootfs {
+		id, idErr := rootfs.Identity()
+		if idErr != nil {
+			continue
+		}
+		l.Info("%s identity: %s", rootfs.ShortName(), id)
 	}
 
 	if failed > 0 {

@@ -74,12 +74,16 @@ A hand-rolled subcommand dispatch over `os.Args[1]`, each command owning a
   `exec_env_stub` binary a container-backed generator needs; generators that run
   no container ignore it.
 - `build` — drive the engine over the discovered artifact graph, with the
-  interactive progress UI; `--invalidate` drops a target's cache entry,
-  `--print-id <Key>` prints a target's identity (its map key) and exits, and
-  `--target <Key>` builds only that one node — with `--no-recurse` the target's
-  dependencies must resolve from the cache (a missing dependency fails the
-  target), so the pair builds exactly one node from cached inputs and its exit
-  status reflects the target alone. `--stream` (with `--target` + `--no-recurse`)
+  interactive progress UI. The graph has one top-level image node per
+  `rootfs-<label>.yml` variant (keyed `rootfs:<label>:<arch>`), and a default
+  build builds them all, sharing the dependency closures they have in common; it
+  prints each variant's identity (the handle `exec-chroot` takes) on success.
+  `--invalidate` drops a target's cache entry, `--print-id <Key>` prints a
+  target's identity (its map key) and exits, and `--target <Key>` builds only that
+  one node — with `--no-recurse` the target's dependencies must resolve from the
+  cache (a missing dependency fails the target), so the pair builds exactly one
+  node from cached inputs and its exit status reflects the target alone. `--stream`
+  (with `--target` + `--no-recurse`)
   forwards the target's logs live to the console instead of the UI, for a legible
   build log on a CI runner. `--list-outputs <Key>` prints the named outputs of an
   already-built target (one name per line), and `--output-path <Key> <output>`
@@ -139,7 +143,9 @@ A hand-rolled subcommand dispatch over `os.Args[1]`, each command owning a
   local store, writes the registry, and is idempotent. The target registry is
   `--registry` or `$GLBX_REGISTRY`.
 - `resolve` — resolve package names against an index, with machine-parseable
-  output on stdout and logs on stderr.
+  output on stdout and logs on stderr. The pseudo-root `?essential` expands to
+  every `Essential: yes` package in the index, so `glbx resolve ?essential`
+  closes over the whole essential set.
 - `status` — report the cache root and the discovered working tree.
 - `exec-chroot` — unpack a stored root filesystem and run a command inside the
   sandbox stack.

@@ -32,17 +32,22 @@ store meet.
   dpkg database so dpkg forgets the base while its files remain, then install
   the binary and its local closure so dpkg configures only our packages — and
   re-emits the validated `.deb`.
-- **Image** (`Rootfs`): identity folds every transitive binary dependency and
-  the pinned image-tooling hashes. Its build action narrows the runtime closure
-  to the shipping set, stages the three-layer overlay (payload / throwaway
-  configuration tooling / mutations), runs dpkg configuration against the merged
-  view, then — before unmounting, so the removals are recorded in the packed
-  layer — drops the staging area and empties `/var/log`, whose dpkg traces vary
-  run to run. It composes the final view from payload and mutations only and
-  serializes the tree as a deterministic `tar.gz`.
+- **Image** (`Rootfs`): one artifact per `rootfs-<label>.yml` variant in the
+  working tree, keyed `rootfs:<label>:<arch>`. Its identity folds the label, the
+  architecture, every transitive binary dependency, and the pinned image-tooling
+  hashes. Its build action narrows the runtime closure to that variant's shipping
+  set, stages the three-layer overlay (payload / throwaway configuration tooling /
+  mutations), runs dpkg configuration against the merged view, then — before
+  unmounting, so the removals are recorded in the packed layer — drops the staging
+  area and empties `/var/log`, whose dpkg traces vary run to run. It composes the
+  final view from payload and mutations only and serializes the tree as a
+  deterministic `tar.gz`. The image-configuration tooling lock (`rootfs-deps.yml`)
+  is shared by every variant: it is the throwaway Layer 1, never shipped, so it
+  does not depend on which packages a variant ships.
 
 `PackageSet` scans the working tree and resolves `<source>:<binary>` references;
-`BuildGraph` turns an image's package list into a discovered graph.
+`BuildGraph` builds one `Rootfs` per variant and lets discovery walk their
+(shared) dependency closures into a single graph.
 
 - **Signing** (`signing.go` + `internal/signing`): when a source build's
   `build.yml` carries a `signing` block, the build starts a host-side signing
