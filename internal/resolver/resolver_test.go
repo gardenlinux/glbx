@@ -710,3 +710,41 @@ func assertNotContains(t *testing.T, names []string, name string) {
 		t.Errorf("did not expect %q in result, got: %v", name, names)
 	}
 }
+
+// TestBacktrackPreservesLaterSiblingDeps reproduces a resolver bug where a
+// package's single-candidate dependency is permanently lost when the solver
+// backtracks to a multi-candidate decision made by an EARLIER dependency group
+// of the same package.
+//
+// Shape: udevlike depends, in order, on (sysa | sysb) and then on laterdep.
+// Processing the groups in order makes the (sysa|sysb) decision first and
+// enqueues laterdep afterwards — so laterdep is not in that decision's queue
+// snapshot. sysa conflicts with needed (a required root), so selecting sysa
+// forces a backtrack to the (sysa|sysb) decision; restoring it rewinds the
+// queue to before laterdep was enqueued, while udevlike stays selected, so its
+// later groups are never reprocessed and laterdep vanishes from the result.
+func TestBacktrackPreservesLaterSiblingDeps(t *testing.T) {
+	idx := buildIndex(t, []pkgSpec{
+		{name: "udevlike", version: "1.0", depends: "sysa | sysb, laterdep"},
+		{name: "sysa", version: "1.0", conflicts: "needed"},
+		{name: "sysb", version: "1.0"},
+		{name: "laterdep", version: "1.0"},
+		{name: "needed", version: "1.0"},
+	})
+
+	r := New(idx, "amd64")
+	result, err := r.Resolve([]Requirement{{Name: "udevlike"}, {Name: "needed"}})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	names := pkgNames(result)
+
+	// The conflict forces sysb to be chosen over sysa, and needed stays in.
+	assertContains(t, names, "udevlike")
+	assertContains(t, names, "sysb")
+	assertContains(t, names, "needed")
+	assertNotContains(t, names, "sysa")
+	// The regression: laterdep, a single-candidate dependency processed after
+	// the backtracked decision, must survive.
+	assertContains(t, names, "laterdep")
+}
