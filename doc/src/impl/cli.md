@@ -6,9 +6,12 @@ A hand-rolled subcommand dispatch over `os.Args[1]`, each command owning a
 `flag.FlagSet`:
 
 - `import <namespace>:<package>` — import an upstream source package into the
-  working tree. The namespace selects the import provider and is always explicit
-  (`debian:<package>` today): import creates `pkgs/<package>/`, so there is no
-  `build.yml` to dispatch on. By default the import is recorded on the package's
+  working tree. The namespace selects the import provider and is always explicit:
+  `debian:<package>` imports into `pkgs/<package>/`, and `tooling-debian:<package>`
+  imports into the assembly-tooling tree `images.d/tooling/<package>/` with the
+  reduced tooling schema (its lineage independent of any same-named `pkgs/`
+  import). Import creates the package directory, so there is no `build.yml` to
+  dispatch on. By default the import is recorded on the package's
   independent upstream lineage: a first import is an orphan commit, each later
   import is parented on the previous import, and the commit — carrying a fenced
   metadata block (`pkg`, `version`, `auto_update`) in its message — is built
@@ -63,8 +66,15 @@ A hand-rolled subcommand dispatch over `os.Args[1]`, each command owning a
     package's `build.yml` and dispatches to the matching concrete generator, so
     the developer need not know whether a package is plain Debian or a special
     case. Writes `pkgs/<name>/build-deps.yml`.
+  - `tooling-pkg:<name>` — the build-tooling lock for an assembly-tool package
+    under `images.d/tooling/<name>/`. Same resolution as `debian`, rooted at the
+    tooling tree; validates the reduced tooling schema. Writes
+    `images.d/tooling/<name>/build-deps.yml`.
   - `rootfs` — the image configuration-tooling lock. Writes top-level
     `rootfs-deps.yml`.
+  - `image-type:<name>` — an image type's assembly-tooling lock: the essential
+    floor plus each `debian_tooling` name's closure from the type's `conf.yml`.
+    Writes `images.d/<name>/tooling-deps.yml`.
   - `debian:<name>` / `debian-kernel:<name>` — the concrete generators, invoked
     directly for debugging.
 
@@ -74,13 +84,17 @@ A hand-rolled subcommand dispatch over `os.Args[1]`, each command owning a
   `exec_env_stub` binary a container-backed generator needs; generators that run
   no container ignore it.
 - `build` — drive the engine over the discovered artifact graph, with the
-  interactive progress UI. The graph has one top-level image node per
-  `rootfs-<label>.yml` variant (keyed `rootfs:<label>:<arch>`), and a default
-  build builds them all, sharing the dependency closures they have in common; it
-  prints each variant's identity (the handle `exec-chroot` takes) on success.
-  `--invalidate` drops a target's cache entry, `--print-id <Key>` prints a
-  target's identity (its map key) and exits, and `--target <Key>` builds only that
-  one node — with `--no-recurse` the target's dependencies must resolve from the
+  interactive progress UI. The graph tops out at one disk-image node per
+  `images.yml` entry (keyed `image:<name>:<arch>`) over one rootfs node per
+  `rootfs-<label>.yml` variant (keyed `rootfs:<label>:<arch>`); when `images.yml`
+  is present a default build builds every image and every rootfs variant, sharing
+  the dependency closures they have in common, and when it is absent the rootfs
+  variants are the top. It prints each rootfs variant's identity (the handle
+  `exec-chroot` takes) and each image's identity on success. `--invalidate` drops
+  a target's cache entry, `--print-id <Key>` prints a target's identity (its map
+  key) and exits, and `--target <Key>` builds only that one node (any of
+  `rootfs:<label>:<arch>`, `image:<name>:<arch>`, or a package node) — with
+  `--no-recurse` the target's dependencies must resolve from the
   cache (a missing dependency fails the target), so the pair builds exactly one
   node from cached inputs and its exit status reflects the target alone. `--stream`
   (with `--target` + `--no-recurse`)

@@ -36,6 +36,12 @@ type Config struct {
 	PkgName   string
 	Cookie    string
 
+	// SubDir is the working-tree subtree the package lives in
+	// (<SubDir>/<PkgName>/). Empty defaults to "pkgs". A tooling package sets
+	// "images.d/tooling", so its lock is read from and written to the tooling
+	// tree, never the shipped pkgs/ tree.
+	SubDir string
+
 	// SnapshotBase is the hash-addressed snapshot file endpoint recorded as a
 	// secondary retrieval URL for each .deb. Empty uses
 	// aptrepo.DefaultSnapshotBase.
@@ -57,7 +63,7 @@ func Generate(cfg Config) (*Result, error) {
 	cfg.applyDefaults()
 	l := log.From(cfg.Ctx, log.Lockfile)
 
-	pkgDir := filepath.Join(cfg.OutputDir, "pkgs", cfg.PkgName)
+	pkgDir := filepath.Join(cfg.OutputDir, cfg.SubDir, cfg.PkgName)
 	controlPath := filepath.Join(pkgDir, "src", "debian", "control")
 	buildDeps, err := extractBuildDeps(controlPath)
 	if err != nil {
@@ -91,6 +97,9 @@ func Generate(cfg Config) (*Result, error) {
 
 func (cfg *Config) applyDefaults() {
 	applyRepoDefaults(&cfg.RepoURL, &cfg.Dist, &cfg.Arch, &cfg.Ctx)
+	if cfg.SubDir == "" {
+		cfg.SubDir = "pkgs"
+	}
 }
 
 func (cfg *RootfsConfig) applyDefaults() {
@@ -331,6 +340,76 @@ type RootfsConfig struct {
 // same explicit-YAML form as a package's build-deps.yml.
 func GenerateRootfs(cfg RootfsConfig) (*Result, error) {
 	cfg.applyDefaults()
+	depsPath := filepath.Join(cfg.OutputDir, "rootfs-deps.yml")
+	return generateToolingLock(toolingLockConfig{
+		Ctx:          cfg.Ctx,
+		Store:        cfg.Store,
+		RepoURL:      cfg.RepoURL,
+		SnapshotBase: cfg.SnapshotBase,
+		Dist:         cfg.Dist,
+		Arch:         cfg.Arch,
+		Cookie:       cfg.Cookie,
+		DepsPath:     depsPath,
+	})
+}
+
+// ImageTypeConfig parameterizes generating an image type's assembly-tooling
+// lock. ExtraRoots is the type's debian_tooling list, resolved on top of the
+// essential floor.
+type ImageTypeConfig struct {
+	Ctx        context.Context
+	Store      *objstore.Store
+	RepoURL    string
+	Dist       string
+	Arch       string
+	OutputDir  string
+	Cookie     string
+	TypeName   string   // images.d/<TypeName>/
+	ExtraRoots []string // debian_tooling names
+
+	SnapshotBase string
+}
+
+// GenerateImageType produces images.d/<name>/tooling-deps.yml: the essential
+// floor plus the runtime closure of every debian_tooling name, in the same
+// explicit-YAML form as rootfs-deps.yml. local_tooling is not pinned here —
+// those are graph edges resolved through the build, not mirror pins.
+func GenerateImageType(cfg ImageTypeConfig) (*Result, error) {
+	applyRepoDefaults(&cfg.RepoURL, &cfg.Dist, &cfg.Arch, &cfg.Ctx)
+	depsPath := filepath.Join(cfg.OutputDir, "images.d", cfg.TypeName, "tooling-deps.yml")
+	return generateToolingLock(toolingLockConfig{
+		Ctx:          cfg.Ctx,
+		Store:        cfg.Store,
+		RepoURL:      cfg.RepoURL,
+		SnapshotBase: cfg.SnapshotBase,
+		Dist:         cfg.Dist,
+		Arch:         cfg.Arch,
+		Cookie:       cfg.Cookie,
+		ExtraRoots:   cfg.ExtraRoots,
+		DepsPath:     depsPath,
+	})
+}
+
+// toolingLockConfig is the shared input to the assembly/configuration tooling
+// lock generators. They differ only in the extra resolver roots appended to the
+// essential floor and the output path.
+type toolingLockConfig struct {
+	Ctx          context.Context
+	Store        *objstore.Store
+	RepoURL      string
+	SnapshotBase string
+	Dist         string
+	Arch         string
+	Cookie       string
+	ExtraRoots   []string
+	DepsPath     string
+}
+
+// generateToolingLock fetches the binary index, resolves the essential floor
+// plus any extra roots, fetches every .deb, and writes the explicit lock. It is
+// the shared body of GenerateRootfs (no extra roots) and GenerateImageType
+// (debian_tooling appended).
+func generateToolingLock(cfg toolingLockConfig) (*Result, error) {
 	l := log.From(cfg.Ctx, log.Lockfile)
 
 	idx, err := FetchBinaryIndex(cfg.Ctx, cfg.Store, cfg.RepoURL, cfg.Dist, cfg.Arch, cfg.Cookie)
@@ -338,32 +417,33 @@ func GenerateRootfs(cfg RootfsConfig) (*Result, error) {
 		return nil, fmt.Errorf("fetch binary index: %w", err)
 	}
 
-	roots := buildRootfsRoots(idx)
+	roots := buildToolingRoots(idx, cfg.ExtraRoots)
 
 	packages, err := resolveAndFetch(cfg.Ctx, cfg.Store, l, idx, roots, cfg.Arch, cfg.RepoURL)
 	if err != nil {
 		return nil, err
 	}
 
-	depsPath := filepath.Join(cfg.OutputDir, "rootfs-deps.yml")
-	if err := writeBuildDeps(depsPath, cfg.RepoURL, cfg.SnapshotBase, packages); err != nil {
-		return nil, fmt.Errorf("write rootfs-deps.yml: %w", err)
+	if err := writeBuildDeps(cfg.DepsPath, cfg.RepoURL, cfg.SnapshotBase, packages); err != nil {
+		return nil, fmt.Errorf("write %s: %w", filepath.Base(cfg.DepsPath), err)
 	}
-
-	return &Result{Arch: cfg.Arch, Packages: len(packages), Path: depsPath}, nil
+	return &Result{Arch: cfg.Arch, Packages: len(packages), Path: cfg.DepsPath}, nil
 }
 
-// buildRootfsRoots assembles the resolver roots for the image configuration
+// buildToolingRoots assembles the resolver roots for assembly/configuration
 // tooling: every Essential package plus the postinst-script infrastructure
-// (perl-base for perl scripts, mawk as the default awk). apt is excluded —
-// configuration is dpkg-only.
-func buildRootfsRoots(idx *index.Index) []resolver.Requirement {
+// (perl-base for perl scripts, mawk as the default awk), then any extra named
+// roots. apt is excluded — these containers are dpkg-only.
+func buildToolingRoots(idx *index.Index, extra []string) []resolver.Requirement {
 	var roots []resolver.Requirement
 	for _, pkg := range idx.EssentialPackages() {
 		roots = append(roots, resolver.Requirement{Name: pkg.Name})
 	}
 	for _, name := range []string{"perl-base", "mawk"} {
 		roots = append(roots, resolver.Requirement{Name: name})
+	}
+	for _, name := range extra {
+		roots = append(roots, resolver.Requirement{Name: name, VirtualEligible: true})
 	}
 	return roots
 }

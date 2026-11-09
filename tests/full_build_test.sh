@@ -84,6 +84,14 @@ phase_build() {
 	fi
 	echo "Rootfs base identity: $ROOTFS_BASE_ID"
 	echo "Rootfs min identity:  $ROOTFS_MIN_ID"
+
+	IMAGE_BASE_ID=$(echo "$BUILD_SUMMARY" | grep "base-ext4 identity:" | awk '{print $NF}')
+	if [ -z "$IMAGE_BASE_ID" ]; then
+		echo "FAIL: could not determine base-ext4 image identity"
+		echo "$BUILD_SUMMARY"
+		exit 1
+	fi
+	echo "Image base-ext4 identity: $IMAGE_BASE_ID"
 }
 
 phase_verify() {
@@ -103,6 +111,29 @@ phase_verify() {
 	echo "$MIN_OUTPUT" | grep -q "MIN_OK" || { echo "FAIL: unexpected min output"; echo "$MIN_OUTPUT"; exit 1; }
 	echo "$MIN_OUTPUT" | grep -q "NO_DPKG" || { echo "FAIL: dpkg unexpectedly present in min image"; echo "$MIN_OUTPUT"; exit 1; }
 	echo "$MIN_OUTPUT"
+
+	echo "=== PHASE: disk-image check (base-ext4) ==="
+	# Pull the harvested image blob out of the cache and confirm it is a valid
+	# ext4 holding the rootfs — proving the type script ran in-container and the
+	# output was harvested from the staging namespace. Checked from outside any
+	# container with host tooling only.
+	IMG_PATH=$("$GLBX" build --cache "$CACHE_DIR" --conf-dir "$STAGING_DIR" --stub "$STUB" \
+		--output-path image:base-ext4:amd64 image 2>/dev/null) || {
+		echo "FAIL: could not resolve base-ext4 image output path"; exit 1;
+	}
+	[ -f "$IMG_PATH" ] || { echo "FAIL: image blob $IMG_PATH missing"; exit 1; }
+	FILE_OUT=$(file -b "$IMG_PATH")
+	echo "image: $IMG_PATH"
+	echo "file:  $FILE_OUT"
+	echo "$FILE_OUT" | grep -qi "ext[234] filesystem" || {
+		echo "FAIL: base-ext4 image is not reported as an ext filesystem"; exit 1;
+	}
+	# When debugfs is available, assert the rootfs landed in the filesystem.
+	if command -v debugfs >/dev/null 2>&1; then
+		LS_OUT=$(debugfs -R 'ls /' "$IMG_PATH" 2>/dev/null) || true
+		echo "$LS_OUT" | grep -q "usr" || { echo "FAIL: /usr not found in ext4 image"; echo "$LS_OUT"; exit 1; }
+		echo "debugfs ls / contains expected top-level entries"
+	fi
 }
 
 case "$PHASE" in

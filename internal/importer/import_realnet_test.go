@@ -375,7 +375,7 @@ func TestImportGitMode(t *testing.T) {
 	}
 
 	// findPreviousImport must now locate the merged import.
-	prev, err := findPreviousImport(root, "hello")
+	prev, err := findPreviousImport(root, "pkgs", "hello")
 	if err != nil {
 		t.Fatalf("findPreviousImport: %v", err)
 	}

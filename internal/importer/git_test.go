@@ -113,7 +113,7 @@ func TestCommitImportTreeDetached(t *testing.T) {
 		"sources.yml":    "sources: []\n",
 	})
 	msg := formatImportMessage("foo", "1.0", "debian:testing")
-	commit, err := commitImportTree(root, content, "foo", msg, "")
+	commit, err := commitImportTree(root, "pkgs", content, "foo", msg, "")
 	if err != nil {
 		t.Fatalf("commitImportTree: %v", err)
 	}
@@ -146,7 +146,7 @@ func TestFindPreviousImport(t *testing.T) {
 
 	// First import (orphan) merged in.
 	c1content := writeContent(t, map[string]string{"debian/control": "Source: foo\nv1\n"})
-	c1, err := commitImportTree(root, c1content, "foo", formatImportMessage("foo", "1.0", "debian:testing"), "")
+	c1, err := commitImportTree(root, "pkgs", c1content, "foo", formatImportMessage("foo", "1.0", "debian:testing"), "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -159,7 +159,7 @@ func TestFindPreviousImport(t *testing.T) {
 	}
 	runGit(t, root, "commit", "-aqm", "local maintainer tweak")
 
-	prev, err := findPreviousImport(root, "foo")
+	prev, err := findPreviousImport(root, "pkgs", "foo")
 	if err != nil {
 		t.Fatalf("findPreviousImport: %v", err)
 	}
@@ -174,7 +174,7 @@ func TestFindPreviousImport(t *testing.T) {
 	}
 
 	// A package never imported returns nil, no error.
-	none, err := findPreviousImport(root, "bar")
+	none, err := findPreviousImport(root, "pkgs", "bar")
 	if err != nil {
 		t.Fatalf("findPreviousImport(bar): %v", err)
 	}
@@ -208,7 +208,7 @@ func TestFindPreviousImportThroughPrunedMerge(t *testing.T) {
 
 	// The real import of foo: an orphan commit whose tree is exactly pkgs/foo,
 	// built the way the importer builds it so it passes lineage validation.
-	imp, err := commitImportTree(root, writeContent(t, map[string]string{
+	imp, err := commitImportTree(root, "pkgs", writeContent(t, map[string]string{
 		"debian/control": "Source: foo\nv1\n",
 	}), "foo", formatImportMessage("foo", "1.0", "debian:testing"), "")
 	if err != nil {
@@ -233,7 +233,7 @@ func TestFindPreviousImportThroughPrunedMerge(t *testing.T) {
 	runGit(t, root, "commit", "-aqm", "advance spine")
 	runGit(t, root, "merge", "--no-edit", "-X", "ours", "side")
 
-	prev, err := findPreviousImport(root, "foo")
+	prev, err := findPreviousImport(root, "pkgs", "foo")
 	if err != nil {
 		t.Fatalf("findPreviousImport: %v", err)
 	}
@@ -285,7 +285,7 @@ func TestFindPreviousImportRejectsCorruptLineage(t *testing.T) {
 	runGit(t, root, "merge", "--no-edit", "--allow-unrelated-histories", badCommit)
 	_ = bad
 
-	if _, err := findPreviousImport(root, "foo"); err == nil {
+	if _, err := findPreviousImport(root, "pkgs", "foo"); err == nil {
 		t.Fatal("expected a hard error on corrupt import lineage, got nil")
 	}
 }
@@ -313,7 +313,7 @@ func importAndMergeTag(t *testing.T, root, pkg, ver, parent, tag string) string 
 	content := writeContent(t, map[string]string{
 		"debian/control": "Source: " + pkg + "\n" + ver + "\n",
 	})
-	commit, err := commitImportTree(root, content, pkg, formatImportMessage(pkg, ver, tag), parent)
+	commit, err := commitImportTree(root, "pkgs", content, pkg, formatImportMessage(pkg, ver, tag), parent)
 	if err != nil {
 		t.Fatalf("commitImportTree(%s %s): %v", pkg, ver, err)
 	}

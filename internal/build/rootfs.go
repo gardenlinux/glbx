@@ -394,25 +394,8 @@ func (r *Rootfs) extractLayers(ctx context.Context, mountNS *container.MountNS, 
 	}
 
 	l.Info("extracting Layer 1 (lockfile packages)")
-	for _, pkg := range layer1Pkgs {
-		if pkg.SHA256 == "" {
-			continue
-		}
-		hash, err := objstore.NewHash(pkg.SHA256)
-		if err != nil {
-			continue
-		}
-		blobPath, err := store.Blobs.Path(hash)
-		if err != nil {
-			continue
-		}
-		if err := container.Run(mountNS, &container.ExecRequest{
-			Argv: []string{"dpkg-deb", "-x", blobPath, paths.layer1},
-			Env:  []string{"DEBIAN_FRONTEND=noninteractive"},
-			Cwd:  "/",
-		}); err != nil {
-			l.Warn("failed to extract %s: %v", pkg.Name, err)
-		}
+	if err := extractDebsRaw(ctx, mountNS, store, layer1Pkgs, paths.layer1, log.Rootfs); err != nil {
+		return err
 	}
 
 	for _, d := range []string{"proc", "sys", "dev"} {

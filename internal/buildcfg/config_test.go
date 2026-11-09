@@ -279,3 +279,108 @@ func TestGoArchToDebian(t *testing.T) {
 		}
 	}
 }
+
+func TestValidateToolingBuildYML(t *testing.T) {
+	// A bare build-only tooling package is accepted.
+	ok := BuildYML{PkgType: "debian", BuildDepends: []string{"gcc:gcc"}}
+	if err := ValidateToolingBuildYML(ok); err != nil {
+		t.Errorf("bare tooling build.yml rejected: %v", err)
+	}
+	// runtime_depends, lockfile_deps, and signing are each forbidden.
+	for name, b := range map[string]BuildYML{
+		"runtime_depends": {RuntimeDepends: map[string][]string{"x": {"a:b"}}},
+		"lockfile_deps":   {LockfileDeps: map[string][]string{"x": {"libc6"}}},
+		"signing":         {Signing: []SigningKey{{KeyName: "k"}}},
+	} {
+		if err := ValidateToolingBuildYML(b); err == nil {
+			t.Errorf("tooling build.yml with %s should be rejected", name)
+		}
+	}
+}
+
+func TestLoadImageTypeConf(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "conf.yml"), `debian_tooling:
+  - e2fsprogs
+  - fdisk
+local_tooling:
+  - e2fsprogs-repro:e2fsprogs
+`)
+	conf, err := LoadImageTypeConf(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(conf.DebianTooling) != 2 || conf.DebianTooling[0] != "e2fsprogs" {
+		t.Errorf("debian_tooling = %v", conf.DebianTooling)
+	}
+	if len(conf.LocalTooling) != 1 || conf.LocalTooling[0] != "e2fsprogs-repro:e2fsprogs" {
+		t.Errorf("local_tooling = %v", conf.LocalTooling)
+	}
+}
+
+func TestLoadImageTypeConf_BadLocalTooling(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "conf.yml"), "local_tooling:\n  - just-a-source\n")
+	if _, err := LoadImageTypeConf(dir); err == nil {
+		t.Fatal("local_tooling without <source>:<binary> form should be rejected")
+	}
+}
+
+func TestLoadImages(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "images.yml"), `images:
+  - name: base-ext4
+    rootfs: base
+    type: plain-ext4
+  - name: min-ext4
+    rootfs: min
+    type: plain-ext4
+`)
+	imgs, err := LoadImages(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(imgs) != 2 || imgs[0].Name != "base-ext4" || imgs[1].Rootfs != "min" {
+		t.Errorf("images = %+v", imgs)
+	}
+}
+
+func TestLoadImages_MissingIsNil(t *testing.T) {
+	imgs, err := LoadImages(t.TempDir())
+	if err != nil {
+		t.Fatalf("missing images.yml should not error: %v", err)
+	}
+	if imgs != nil {
+		t.Errorf("missing images.yml should yield nil, got %+v", imgs)
+	}
+}
+
+func TestLoadImages_IncompleteEntryErrors(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "images.yml"), "images:\n  - name: x\n    rootfs: base\n")
+	if _, err := LoadImages(dir); err == nil {
+		t.Fatal("images.yml entry missing type should be rejected")
+	}
+}
+
+func TestDiscoverImageTypes(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "images.d", "plain-ext4", "conf.yml"), "debian_tooling: [e2fsprogs]\n")
+	writeFile(t, filepath.Join(dir, "images.d", "gpt-bootable", "conf.yml"), "debian_tooling: [fdisk]\n")
+	// tooling/ is reserved and never a type; a dir without conf.yml is skipped.
+	writeFile(t, filepath.Join(dir, "images.d", "tooling", "e2fsprogs", "build.yml"), "pkg_type: debian\n")
+	if err := os.MkdirAll(filepath.Join(dir, "images.d", "no-conf"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	types := DiscoverImageTypes(dir)
+	want := []string{"gpt-bootable", "plain-ext4"}
+	if len(types) != 2 || types[0] != want[0] || types[1] != want[1] {
+		t.Errorf("DiscoverImageTypes = %v, want %v", types, want)
+	}
+}
+
+func TestDiscoverImageTypes_NoImagesDir(t *testing.T) {
+	if types := DiscoverImageTypes(t.TempDir()); types != nil {
+		t.Errorf("no images.d should yield nil, got %v", types)
+	}
+}

@@ -64,6 +64,12 @@ type ImportConfig struct {
 	// is not a git repository) the packaging is written directly into
 	// pkgs/<name>/ instead.
 	GitHistory bool
+
+	// SubDir is the working-tree subtree the import lands in (<subdir>/<name>/),
+	// also the path its lineage is recorded under. Empty defaults to "pkgs". A
+	// tooling import sets "images.d/tooling", keeping its lineage and tree fully
+	// independent from a same-named shipped import under pkgs/.
+	SubDir string
 }
 
 // ImportResult contains the results of a successful source package import.
@@ -109,6 +115,9 @@ func (cfg *ImportConfig) defaults() {
 	if cfg.HTTPClient == nil {
 		cfg.HTTPClient = http.DefaultClient
 	}
+	if cfg.SubDir == "" {
+		cfg.SubDir = "pkgs"
+	}
 }
 
 // Import fetches and imports a Debian source package from an APT repository.
@@ -137,7 +146,7 @@ func Import(cfg ImportConfig, packageName string) (*ImportResult, error) {
 	// warning; direct mode is silent.
 	gitMode := cfg.GitHistory && isGitRepo(cfg.OutputDir)
 	if cfg.GitHistory && !gitMode {
-		l.Warn("%s is not a git repository; writing pkgs/%s directly without import history", cfg.OutputDir, packageName)
+		l.Warn("%s is not a git repository; writing %s/%s directly without import history", cfg.OutputDir, cfg.SubDir, packageName)
 	}
 
 	idx, err := loadSourceIndex(cfg)
@@ -154,7 +163,7 @@ func Import(cfg ImportConfig, packageName string) (*ImportResult, error) {
 	// version is a no-op, and its commit becomes the parent of the new import.
 	var parent *importCommit
 	if gitMode {
-		parent, err = findPreviousImport(cfg.OutputDir, srcPkg.Name)
+		parent, err = findPreviousImport(cfg.OutputDir, cfg.SubDir, srcPkg.Name)
 		if err != nil {
 			return nil, fmt.Errorf("importer: %w", err)
 		}
@@ -321,7 +330,7 @@ func extractInto(cfg ImportConfig, srcPkg *sourcePackage, sourceFiles map[string
 // extractToTree extracts the package directly into pkgs/<name>/ under the
 // working tree (direct, non-git mode).
 func extractToTree(cfg ImportConfig, srcPkg *sourcePackage, sourceFiles map[string]objstore.Hash, sourceSHA1 map[string]string) (*ImportResult, error) {
-	pkgDir := filepath.Join(cfg.OutputDir, "pkgs", srcPkg.Name)
+	pkgDir := filepath.Join(cfg.OutputDir, cfg.SubDir, srcPkg.Name)
 	origEntries, err := extractInto(cfg, srcPkg, sourceFiles, sourceSHA1, pkgDir)
 	if err != nil {
 		return nil, err
@@ -355,7 +364,7 @@ func extractAndCommit(cfg ImportConfig, srcPkg *sourcePackage, sourceFiles map[s
 	if parent != nil {
 		parentHash = parent.Hash
 	}
-	commit, err := commitImportTree(cfg.OutputDir, contentDir, srcPkg.Name, msg, parentHash)
+	commit, err := commitImportTree(cfg.OutputDir, cfg.SubDir, contentDir, srcPkg.Name, msg, parentHash)
 	if err != nil {
 		return nil, fmt.Errorf("importer: building import commit: %w", err)
 	}

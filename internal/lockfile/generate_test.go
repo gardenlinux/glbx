@@ -155,23 +155,41 @@ func TestRootfsConfigApplyDefaults(t *testing.T) {
 	}
 }
 
-func TestBuildRootfsRootsIncludesPostinstInfra(t *testing.T) {
+func TestBuildToolingRootsIncludesPostinstInfra(t *testing.T) {
 	idx := makeIndex(t, []map[string]string{
 		{"package": "libc6", "version": "1", "essential": "yes"},
 		{"package": "dash", "version": "1"},
 	})
-	roots := buildRootfsRoots(idx)
+	roots := buildToolingRoots(idx, nil)
 	names := make(map[string]bool)
 	for _, r := range roots {
 		names[r.Name] = true
 	}
 	for _, want := range []string{"libc6", "perl-base", "mawk"} {
 		if !names[want] {
-			t.Errorf("buildRootfsRoots missing %q: %v", want, names)
+			t.Errorf("buildToolingRoots missing %q: %v", want, names)
 		}
 	}
 	if names["apt"] {
-		t.Errorf("buildRootfsRoots should not include apt — image configuration is dpkg-only")
+		t.Errorf("buildToolingRoots should not include apt — tooling containers are dpkg-only")
+	}
+}
+
+// The image-type root builder appends exactly the debian_tooling names on top
+// of the essential floor and the postinst infrastructure.
+func TestBuildToolingRootsAppendsExtraRoots(t *testing.T) {
+	idx := makeIndex(t, []map[string]string{
+		{"package": "libc6", "version": "1", "essential": "yes"},
+	})
+	roots := buildToolingRoots(idx, []string{"e2fsprogs", "fdisk"})
+	names := make(map[string]bool)
+	for _, r := range roots {
+		names[r.Name] = true
+	}
+	for _, want := range []string{"libc6", "perl-base", "mawk", "e2fsprogs", "fdisk"} {
+		if !names[want] {
+			t.Errorf("buildToolingRoots missing %q: %v", want, names)
+		}
 	}
 }
 

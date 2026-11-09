@@ -69,6 +69,25 @@ type SigningKey struct {
 	CertFile string `yaml:"cert_file"`
 }
 
+// ValidateToolingBuildYML rejects fields that imply a runtime or validation
+// phase a tooling package does not have. A tooling package is a Debian source
+// build and nothing more: it ships no runtime closure and is never subjected to
+// the binary-package locality or install checks, so declaring runtime_depends
+// or lockfile_deps — or requesting out-of-container signing, which only a
+// shipped package's build uses — is a configuration error.
+func ValidateToolingBuildYML(b BuildYML) error {
+	if len(b.RuntimeDepends) > 0 {
+		return fmt.Errorf("buildcfg: tooling build.yml must not declare runtime_depends")
+	}
+	if len(b.LockfileDeps) > 0 {
+		return fmt.Errorf("buildcfg: tooling build.yml must not declare lockfile_deps")
+	}
+	if len(b.Signing) > 0 {
+		return fmt.Errorf("buildcfg: tooling build.yml must not declare signing")
+	}
+	return nil
+}
+
 // LoadBuildYML reads build.yml from a package directory, returning the zero
 // value when the file is absent.
 func LoadBuildYML(pkgDir string) (BuildYML, error) {
@@ -230,4 +249,103 @@ func LoadRootfsLabel(dir, label string) []string {
 		return nil
 	}
 	return raw.Packages
+}
+
+// ImageTypeConf is an image type's definition (images.d/<type>/conf.yml): the
+// two lists of assembly tools its container must contain. The assembly script
+// itself (images.d/<type>/build) is run by its shebang and is not named here.
+type ImageTypeConf struct {
+	// DebianTooling names mirror binary packages resolved and pinned, with their
+	// runtime closure, into the type's tooling-deps.yml on top of the essential
+	// floor.
+	DebianTooling []string `yaml:"debian_tooling"`
+	// LocalTooling names locally built tooling in "<source>:<binary>" form,
+	// pointing into images.d/tooling/<source>. These are graph edges to the
+	// tooling build node, overlaid on the mirrored tools, not mirror pins.
+	LocalTooling []string `yaml:"local_tooling"`
+}
+
+type imageTypeConfYML struct {
+	DebianTooling []string `yaml:"debian_tooling"`
+	LocalTooling  []string `yaml:"local_tooling"`
+}
+
+// LoadImageTypeConf reads conf.yml from an image type directory and validates
+// that each local_tooling entry is in "<source>:<binary>" form.
+func LoadImageTypeConf(typeDir string) (ImageTypeConf, error) {
+	var out ImageTypeConf
+	data, err := os.ReadFile(filepath.Join(typeDir, "conf.yml"))
+	if err != nil {
+		return out, err
+	}
+	var raw imageTypeConfYML
+	if err := yaml.Unmarshal(data, &raw); err != nil {
+		return out, fmt.Errorf("buildcfg: parse conf.yml: %w", err)
+	}
+	for _, spec := range raw.LocalTooling {
+		src, bin, ok := strings.Cut(spec, ":")
+		if !ok || src == "" || bin == "" {
+			return out, fmt.Errorf("buildcfg: conf.yml local_tooling %q must be in <source>:<binary> form", spec)
+		}
+	}
+	out.DebianTooling = raw.DebianTooling
+	out.LocalTooling = raw.LocalTooling
+	return out, nil
+}
+
+// ImageSpec is one entry of the top-level images.yml: a concrete image pairing
+// a rootfs variant with an image type under a developer-chosen artifact label.
+type ImageSpec struct {
+	Name   string `yaml:"name"`   // artifact label, surfaced as image:<name>:<arch>
+	Rootfs string `yaml:"rootfs"` // a rootfs-<label>.yml label
+	Type   string `yaml:"type"`   // an images.d/<type>/ directory
+}
+
+type imagesYML struct {
+	Images []ImageSpec `yaml:"images"`
+}
+
+// LoadImages reads the top-level images.yml spec list from confDir. A missing
+// file is not an error — it means the config repo has no image layer — and
+// yields nil.
+func LoadImages(confDir string) ([]ImageSpec, error) {
+	data, err := os.ReadFile(filepath.Join(confDir, "images.yml"))
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	var raw imagesYML
+	if err := yaml.Unmarshal(data, &raw); err != nil {
+		return nil, fmt.Errorf("buildcfg: parse images.yml: %w", err)
+	}
+	for _, img := range raw.Images {
+		if img.Name == "" || img.Rootfs == "" || img.Type == "" {
+			return nil, fmt.Errorf("buildcfg: images.yml entry must set name, rootfs, and type (got %+v)", img)
+		}
+	}
+	return raw.Images, nil
+}
+
+// DiscoverImageTypes lists the image types declared under confDir/images.d/:
+// each subdirectory carrying a conf.yml, excluding the reserved tooling/ tree.
+// The returned names are sorted. A missing images.d/ yields nil.
+func DiscoverImageTypes(confDir string) []string {
+	entries, err := os.ReadDir(filepath.Join(confDir, "images.d"))
+	if err != nil {
+		return nil
+	}
+	var types []string
+	for _, e := range entries {
+		if !e.IsDir() || e.Name() == "tooling" {
+			continue
+		}
+		if _, err := os.Stat(filepath.Join(confDir, "images.d", e.Name(), "conf.yml")); err != nil {
+			continue
+		}
+		types = append(types, e.Name())
+	}
+	sort.Strings(types)
+	return types
 }

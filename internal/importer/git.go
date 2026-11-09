@@ -90,7 +90,7 @@ func parseImportMetadata(msg string) (fields map[string]string, ok bool, err err
 // pkgs/<pkg>, newest first; the first match is the previous import. A match
 // that fails validateImportCommit is a hard error (corrupt lineage), not a
 // reason to fall through to an older commit.
-func findPreviousImport(root, pkg string) (*importCommit, error) {
+func findPreviousImport(root, subDir, pkg string) (*importCommit, error) {
 	// An unborn branch (no commit yet) trivially has no prior import, and
 	// git log would error on it.
 	if exec.Command("git", "-C", root, "rev-parse", "--verify", "-q", "HEAD").Run() != nil {
@@ -98,12 +98,12 @@ func findPreviousImport(root, pkg string) (*importCommit, error) {
 	}
 
 	// --full-history disables history simplification: when a merge brings the
-	// import onto a side branch whose pkgs/<pkg> tree matches the first parent,
-	// default path-filtered git log follows only the first parent and prunes the
-	// side holding the import, hiding it from the walk. --topo-order keeps the
-	// output strictly newest-ancestor-first so the first marker match is the
-	// most recent import.
-	pkgPath := path.Join("pkgs", pkg)
+	// import onto a side branch whose <subDir>/<pkg> tree matches the first
+	// parent, default path-filtered git log follows only the first parent and
+	// prunes the side holding the import, hiding it from the walk. --topo-order
+	// keeps the output strictly newest-ancestor-first so the first marker match
+	// is the most recent import.
+	pkgPath := path.Join(subDir, pkg)
 	out, err := exec.Command("git", "-C", root, "log", "--full-history", "--topo-order", "--format=%H", "--", pkgPath).Output()
 	if err != nil {
 		return nil, fmt.Errorf("listing history for %s: %w", pkgPath, err)
@@ -121,7 +121,7 @@ func findPreviousImport(root, pkg string) (*importCommit, error) {
 		if !ok {
 			continue
 		}
-		if err := validateImportCommit(root, hash, pkg); err != nil {
+		if err := validateImportCommit(root, hash, subDir, pkg); err != nil {
 			return nil, fmt.Errorf("import commit %s for %s is invalid: %w", hash, pkg, err)
 		}
 		return &importCommit{Hash: hash, Version: fields["version"]}, nil
@@ -227,9 +227,9 @@ func presentPackages(root string) (map[string]bool, error) {
 }
 
 // validateImportCommit sanity-checks that commit is a well-formed import for
-// pkg: its message carries both exact markers, and its tree contains nothing
-// outside pkgs/<pkg>/. The structure inside pkgs/<pkg>/ is not checked.
-func validateImportCommit(root, commit, pkg string) error {
+// pkg under subDir: its message carries both exact markers, and its tree
+// contains nothing outside <subDir>/<pkg>/. The structure inside is not checked.
+func validateImportCommit(root, commit, subDir, pkg string) error {
 	msg, err := commitMessage(root, commit)
 	if err != nil {
 		return err
@@ -245,7 +245,7 @@ func validateImportCommit(root, commit, pkg string) error {
 	if err != nil {
 		return fmt.Errorf("listing tree: %w", err)
 	}
-	prefix := path.Join("pkgs", pkg) + "/"
+	prefix := path.Join(subDir, pkg) + "/"
 	for _, p := range strings.Split(strings.TrimRight(string(out), "\n"), "\n") {
 		if p == "" {
 			continue
@@ -278,11 +278,12 @@ func commitMessage(root, commit string) (string, error) {
 }
 
 // commitImportTree builds an import commit for pkg from the self-contained
-// contentDir (which becomes the pkgs/<pkg>/ subtree) and returns its hash. The
-// commit is constructed entirely through plumbing against a throwaway index, so
-// neither the real index, the working tree, nor any branch is touched. parent
-// is the previous import commit, or empty for a first (orphan) import.
-func commitImportTree(root, contentDir, pkg, message, parent string) (string, error) {
+// contentDir (which becomes the <subDir>/<pkg>/ subtree) and returns its hash.
+// The commit is constructed entirely through plumbing against a throwaway
+// index, so neither the real index, the working tree, nor any branch is
+// touched. parent is the previous import commit, or empty for a first (orphan)
+// import.
+func commitImportTree(root, subDir, contentDir, pkg, message, parent string) (string, error) {
 	idx, err := os.CreateTemp("", "glbx-import-index-*")
 	if err != nil {
 		return "", fmt.Errorf("creating temp index: %w", err)
@@ -317,12 +318,12 @@ func commitImportTree(root, contentDir, pkg, message, parent string) (string, er
 		return "", err
 	}
 
-	// Re-read that subtree under pkgs/<pkg>/ into a fresh index, giving a
+	// Re-read that subtree under <subDir>/<pkg>/ into a fresh index, giving a
 	// top-level tree whose only content is the package directory.
 	if err := os.Remove(indexPath); err != nil {
 		return "", fmt.Errorf("resetting temp index: %w", err)
 	}
-	if _, err := git("read-tree", "--prefix=pkgs/"+pkg+"/", subtree); err != nil {
+	if _, err := git("read-tree", "--prefix="+path.Join(subDir, pkg)+"/", subtree); err != nil {
 		return "", err
 	}
 	topTree, err := git("write-tree")

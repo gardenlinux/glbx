@@ -204,6 +204,71 @@ not the inert script text but the tooling needed to *execute* it and the
 Layer 2 respectively. The image therefore carries no installer, even though a
 few packages carry their own (now inert) installation scripts.
 
+## The disk image: assembling a bootable artifact above the rootfs
+
+The rootfs tarball is not the end of the line. A bootable disk image sits one
+layer above it: the rootfs is its input, and a **disk image** — a filesystem, or
+a partitioned, bootable medium — is its output. The rootfs is the deterministic
+tree described above; the image is what a machine actually boots.
+
+An image is produced by running an **image type**'s assembly script inside a
+container. An image type bundles two things: a declaration of the assembly tools
+its container needs, and an executable `build` script that turns a rootfs into a
+disk image. The script's contract is deliberately tiny — it is handed the rootfs
+tarball as its first argument and an output path as its second, and it writes a
+disk image to that path and exits. It runs with the capability to mount a tmpfs
+but is handed no loop device, so a type populates a filesystem from a directory
+tree rather than by mounting one. glbx stores whatever bytes the script writes
+and content-addresses them, exactly as it does the rootfs tarball. A single
+image type is reusable across rootfs variants, and the top-level image spec is
+where each concrete rootfs×type pairing is named.
+
+### The assembly tooling universe
+
+The tools that *assemble* an image are a world of their own, distinct from both
+the packages shipped in the rootfs and the tooling that *configures* the rootfs.
+The distinction is the same one that runs through this whole document — a tool
+used to build an artifact is not the artifact — applied one level up:
+
+- The shipped `e2fsprogs` (if an image ever ships one) comes from the normal
+  package build and passes the full binary validation and locality gate.
+- The rootfs *configuration* tooling (`dpkg`, the interpreters, the essential
+  base of Layer 1 above) is the throwaway machinery that runs maintainer
+  scripts, mirrored from Debian and discarded from the result.
+- The image *assembly* tooling (the `mkfs` that writes a filesystem, the
+  partitioner that lays out a disk) is a third thing again: present only while
+  the type's script runs, never shipped, and — where a stock tool will not do —
+  buildable from source as its own package.
+
+Those assembly-tool packages live in their own tree and their own identity and
+dependency namespace. An assembly-time tool and a shipped tool of the same
+upstream name are different artifacts that never collide: the assembly tool has
+only a build step feeding the assembly container, no binary-validation phase and
+no runtime closure, and its build dependencies resolve only among other assembly
+tools. A type's container is populated from a lock of mirrored Debian assembly
+tools plus, layered on top, any locally built assembly tool — so a patched,
+reproducible `mkfs` overrides the stock one the mirror would supply, the same way
+the payload overrides the throwaway tooling during rootfs assembly.
+
+### Determinism is the image type's contract
+
+[ARCHITECTURE.md](./architecture.md) §6 and the tarball discussion above set the
+bar: an artifact's output must be a pure function of its inputs. For a disk image
+that bar is a **contract the image type must honor**, not something glbx can
+enforce from outside. glbx stores whatever bytes land at the script's output
+path and hashes them; it does not inspect or rewrite them. Keeping those bytes
+stable across runs — so an unchanged rootfs and an unchanged type resolve to an
+unchanged image hash — is the job of the script and the tools it invokes.
+
+The entropy a disk image carries is exactly the surface named above: filesystem
+creation timestamps and per-filesystem UUIDs, the GPT disk GUID and
+per-partition GUIDs, and partition geometry. Every one of those has to be forced
+to a value derived from the inputs rather than from the clock or `/dev/urandom`.
+A type whose script and tooling do this produces a reproducible image; one that
+does not produces a different hash each run, defeating the cache. Which tools
+meet the bar, and how, is a property of each type — glbx's responsibility ends at
+storing and addressing the bytes.
+
 ## Serializing the result deterministically
 
 The final overlay view is a complete root filesystem tree. The last step turns
