@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"syscall"
 
@@ -12,6 +13,7 @@ import (
 	"github.com/gardenlinux/glbx/internal/buildcfg"
 	"github.com/gardenlinux/glbx/internal/container"
 	"github.com/gardenlinux/glbx/internal/debian/index"
+	"github.com/gardenlinux/glbx/internal/dirhash"
 	"github.com/gardenlinux/glbx/internal/install"
 	"github.com/gardenlinux/glbx/internal/log"
 	"github.com/gardenlinux/glbx/internal/objstore"
@@ -23,7 +25,7 @@ import (
 // entries:
 //
 //	openssl rand -hex 16
-const rootfsSeed = "62bf3b3274afbda97d1100a6b81d7230"
+const rootfsSeed = "ba9fb29ed2b5ae7cb88cb45549b5aa49"
 
 // Rootfs represents a root filesystem artifact assembled via the three-layer
 // overlay model:
@@ -158,6 +160,16 @@ func (r *Rootfs) Identity() (objstore.Hash, error) {
 				parts = append(parts, f.Hash.String())
 			}
 		}
+	}
+
+	// Fold the content of the variant's setup-script directory. A symlinked
+	// script folds its target string (not the pointed-to content), which is
+	// deterministic; absence folds a fixed marker so it is stable and distinct.
+	confDir := filepath.Join(r.baseDir, "rootfs-"+r.Label+".conf.d")
+	if h, err := dirhash.HashDirectory(confDir); err == nil {
+		parts = append(parts, "conf.d:"+h)
+	} else {
+		parts = append(parts, "conf.d:none")
 	}
 
 	for _, bp := range r.allBinaryDeps() {
@@ -451,9 +463,9 @@ func (r *Rootfs) runDpkg(ctx context.Context, mountNS *container.MountNS, store 
 		return fmt.Errorf("dpkg --configure --pending: %w", err)
 	}
 
-	if err := cont.Symlink("/bin/bash", "/bin/sh"); err != nil && !os.IsExist(err) {
+	if err := r.runConfScripts(ctx, cont, mountNS, rootEnv, paths); err != nil {
 		cont.Close()
-		return fmt.Errorf("create /bin/sh symlink: %w", err)
+		return err
 	}
 
 	cont.Close()
@@ -474,19 +486,97 @@ func (r *Rootfs) runDpkg(ctx context.Context, mountNS *container.MountNS, store 
 		return fmt.Errorf("remove /pkgs staging dir: %w", err)
 	}
 
-	// Empty /var/log: dpkg --unpack/--configure append build-time traces
-	// (dpkg.log, alternatives.log) whose content varies run to run, defeating
-	// reproducibility. Clear its contents here, before the overlay is unmounted,
-	// so the removals are recorded in the packed layer. The directory itself is
-	// kept — packages expect it to exist.
-	if err := removeDirContents(mountNS, paths.merged+"/var/log"); err != nil {
-		return fmt.Errorf("empty /var/log: %w", err)
+	// Tear down the conf.d staging area the same way, before the overlay is
+	// unmounted, so the setup scripts are not recorded in the packed rootfs. A
+	// no-op when no scripts ran (the directory was never created).
+	if err := removeDirContents(mountNS, paths.merged+confScriptDir); err != nil {
+		return fmt.Errorf("clear conf.d staging: %w", err)
+	}
+	if err := mountNS.Rmdir(paths.merged + confScriptDir); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("remove conf.d staging dir: %w", err)
 	}
 
 	if err := mountNS.Umount(paths.merged, syscall.MNT_DETACH); err != nil {
 		return fmt.Errorf("umount overlay: %w", err)
 	}
 	return nil
+}
+
+// confScriptDir is the in-rootfs staging path the variant's setup scripts are
+// copied to for execution. It is removed before the rootfs is packed, so it
+// never appears in the output.
+const confScriptDir = "/glbx-conf.d"
+
+// runConfScripts copies the executable files of the variant's
+// rootfs-<label>.conf.d directory into the merged overlay and runs each inside
+// the container, in byte-wise name order, with the rootfs as /. Scripts are run
+// by their shebang (#!/bin/bash); a non-zero exit fails the build. A missing or
+// empty conf.d directory is a no-op. A script reached through a symlink is read
+// with the symlink followed, so one variant's conf.d may link to another's to
+// share a single source.
+func (r *Rootfs) runConfScripts(ctx context.Context, cont *container.Container, mountNS *container.MountNS, env []string, paths *rootfsPaths) error {
+	l := log.From(ctx, log.Rootfs)
+
+	confDir := filepath.Join(r.baseDir, "rootfs-"+r.Label+".conf.d")
+	entries, err := os.ReadDir(confDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("read %s: %w", confDir, err)
+	}
+
+	var names []string
+	for _, e := range entries {
+		// Stat follows symlinks: a linked script resolves to its regular-file
+		// target, and only regular files are run.
+		info, err := os.Stat(filepath.Join(confDir, e.Name()))
+		if err != nil || !info.Mode().IsRegular() {
+			continue
+		}
+		names = append(names, e.Name())
+	}
+	if len(names) == 0 {
+		return nil
+	}
+	sort.Strings(names)
+
+	if err := mountNS.Mkdir(paths.merged+confScriptDir, 0755); err != nil {
+		return fmt.Errorf("mkdir conf.d staging: %w", err)
+	}
+
+	for _, name := range names {
+		data, err := os.ReadFile(filepath.Join(confDir, name))
+		if err != nil {
+			return fmt.Errorf("read conf.d script %s: %w", name, err)
+		}
+		if err := writeThroughMountNS(mountNS, paths.merged+confScriptDir+"/"+name, data, 0755); err != nil {
+			return fmt.Errorf("stage conf.d script %s: %w", name, err)
+		}
+	}
+
+	for _, name := range names {
+		l.Info("running conf.d script %s", name)
+		if err := execIn(ctx, cont, env, nil, "/", confScriptDir+"/"+name); err != nil {
+			return fmt.Errorf("conf.d script %s: %w", name, err)
+		}
+	}
+	return nil
+}
+
+// writeThroughMountNS creates (or truncates) a file inside the mount namespace
+// and writes data to it, via the fd the namespace hands back — the bytes land in
+// the overlay without routing through an in-container process.
+func writeThroughMountNS(mountNS *container.MountNS, path string, data []byte, mode uint32) error {
+	f, err := mountNS.Open(path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, mode)
+	if err != nil {
+		return err
+	}
+	if _, err := f.Write(data); err != nil {
+		f.Close()
+		return err
+	}
+	return f.Close()
 }
 
 // removeDirContents recursively removes everything under dir, leaving dir itself

@@ -145,10 +145,16 @@ else
 		[ "$base" = "rootfs-deps.yml" ] && continue
 		cp "$variant" "$CONF_DIR/$base"
 	done
+	for confd in "$TEMPLATES_DIR"/rootfs-*.conf.d; do
+		[ -d "$confd" ] || continue
+		# -a preserves the within-conf.d symlinks that let one variant share
+		# another's scripts.
+		cp -a "$confd" "$CONF_DIR/$(basename "$confd")"
+	done
 	echo "Generating rootfs lockfile..."
 	"$GLBX" lockfile "${CACHE_ARGS[@]}" --params "cookie=$COOKIE" --stub "$STUB" --output "$CONF_DIR" rootfs \
 		|| { echo "FAIL: lockfile rootfs"; exit 1; }
-	git_commit "configure rootfs images" rootfs-deps.yml rootfs-*.yml
+	git_commit "configure rootfs images" rootfs-deps.yml rootfs-*.yml rootfs-*.conf.d
 fi
 
 echo "=== Image layer ==="

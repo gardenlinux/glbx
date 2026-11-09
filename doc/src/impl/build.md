@@ -34,16 +34,30 @@ store meet.
   re-emits the validated `.deb`.
 - **Rootfs** (`Rootfs`): one artifact per `rootfs-<label>.yml` variant in the
   working tree, keyed `rootfs:<label>:<arch>`. Its identity folds the label, the
-  architecture, every transitive binary dependency, and the pinned image-tooling
-  hashes. Its build action narrows the runtime closure to that variant's shipping
-  set, stages the three-layer overlay (payload / throwaway configuration tooling /
-  mutations), runs dpkg configuration against the merged view, then — before
-  unmounting, so the removals are recorded in the packed layer — drops the staging
-  area and empties `/var/log`, whose dpkg traces vary run to run. It composes the
-  final view from payload and mutations only and serializes the tree as a
+  architecture, every transitive binary dependency, the pinned image-tooling
+  hashes, and the content of the variant's `rootfs-<label>.conf.d` setup-script
+  directory. Its build action narrows the runtime closure to that variant's
+  shipping set, stages the three-layer overlay (payload / throwaway configuration
+  tooling / mutations), runs dpkg configuration against the merged view, then runs
+  the variant's conf.d setup scripts (see below), and — before unmounting, so the
+  removals are recorded in the packed layer — drops the staging areas. It composes
+  the final view from payload and mutations only and serializes the tree as a
   deterministic `tar.gz`. The image-configuration tooling lock (`rootfs-deps.yml`)
   is shared by every variant: it is the throwaway Layer 1, never shipped, so it
   does not depend on which packages a variant ships.
+
+  A variant's post-configuration customization lives in an optional
+  `rootfs-<label>.conf.d` directory of executable scripts. glbx copies each
+  regular file in the directory into the rootfs and runs it inside the container,
+  in byte-wise name order, with the rootfs as `/`; a script is run by its shebang
+  (`#!/bin/bash`, `set -e` by convention) and a non-zero exit fails the build. The
+  scripts are staged to a temporary in-rootfs directory removed before the tree is
+  packed, so they leave no trace of their own. A missing or empty directory runs
+  nothing — the base rootfs carries no built-in content policy. A script reached
+  through a symlink is read with the link followed, so one variant's conf.d may
+  symlink to another's to share a single source. The `/bin/sh` → `/bin/bash`
+  symlink and the reproducibility-driven `/var/log` cleanse are supplied this way,
+  not hardcoded.
 - **Tooling build** (`ToolingPkgBuild`): an image-assembly tool's source build,
   keyed `tooling-pkg-build:<source>:<arch>` — a distinct key namespace and a
   distinct identity seed from `DebianPkgBuild`, so a same-named shipped source
