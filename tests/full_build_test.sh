@@ -75,22 +75,34 @@ phase_build() {
 		|| { echo "FAIL: build"; exit 1; }
 
 	BUILD_SUMMARY=$("$GLBX" build --cache "$CACHE_DIR" --conf-dir "$STAGING_DIR" --stub "$STUB" 2>/dev/null)
-	ROOTFS_ID=$(echo "$BUILD_SUMMARY" | grep "rootfs identity:" | awk '{print $NF}')
-	if [ -z "$ROOTFS_ID" ]; then
-		echo "FAIL: could not determine rootfs identity"
+	ROOTFS_BASE_ID=$(echo "$BUILD_SUMMARY" | grep "rootfs-base identity:" | awk '{print $NF}')
+	ROOTFS_MIN_ID=$(echo "$BUILD_SUMMARY" | grep "rootfs-min identity:" | awk '{print $NF}')
+	if [ -z "$ROOTFS_BASE_ID" ] || [ -z "$ROOTFS_MIN_ID" ]; then
+		echo "FAIL: could not determine rootfs identities"
+		echo "$BUILD_SUMMARY"
 		exit 1
 	fi
-	echo "Rootfs identity: $ROOTFS_ID"
+	echo "Rootfs base identity: $ROOTFS_BASE_ID"
+	echo "Rootfs min identity:  $ROOTFS_MIN_ID"
 }
 
 phase_verify() {
-	[ -z "${ROOTFS_ID:-}" ] && phase_build
-	echo "=== PHASE: exec-chroot smoke test ==="
-	EXEC_OUTPUT=$("$GLBX" exec-chroot --cache "$CACHE_DIR" "$ROOTFS_ID" bash -c 'echo ACCEPTANCE_OK && ls /usr/bin/cat && id' 2>&1) || {
-		echo "FAIL: exec-chroot"; echo "$EXEC_OUTPUT"; exit 1;
+	[ -z "${ROOTFS_BASE_ID:-}" ] && phase_build
+	echo "=== PHASE: exec-chroot smoke test (base) ==="
+	EXEC_OUTPUT=$("$GLBX" exec-chroot --cache "$CACHE_DIR" "$ROOTFS_BASE_ID" bash -c 'echo ACCEPTANCE_OK && ls /usr/bin/cat && id' 2>&1) || {
+		echo "FAIL: exec-chroot base"; echo "$EXEC_OUTPUT"; exit 1;
 	}
 	echo "$EXEC_OUTPUT" | grep -q "ACCEPTANCE_OK" || { echo "FAIL: unexpected exec-chroot output"; echo "$EXEC_OUTPUT"; exit 1; }
 	echo "$EXEC_OUTPUT"
+
+	echo "=== PHASE: exec-chroot smoke test (min) ==="
+	# The min image ships bash + coreutils but not dpkg; prove both facts.
+	MIN_OUTPUT=$("$GLBX" exec-chroot --cache "$CACHE_DIR" "$ROOTFS_MIN_ID" bash -c 'echo MIN_OK && ls /usr/bin/cat && ! ls /usr/bin/dpkg 2>/dev/null && echo NO_DPKG' 2>&1) || {
+		echo "FAIL: exec-chroot min"; echo "$MIN_OUTPUT"; exit 1;
+	}
+	echo "$MIN_OUTPUT" | grep -q "MIN_OK" || { echo "FAIL: unexpected min output"; echo "$MIN_OUTPUT"; exit 1; }
+	echo "$MIN_OUTPUT" | grep -q "NO_DPKG" || { echo "FAIL: dpkg unexpectedly present in min image"; echo "$MIN_OUTPUT"; exit 1; }
+	echo "$MIN_OUTPUT"
 }
 
 case "$PHASE" in

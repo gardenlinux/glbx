@@ -1,7 +1,7 @@
 // Package buildcfg holds the on-disk YAML schemas and their typed loaders:
 // the hand-authored per-package build declaration (build.yml), the generated
 // source pins (sources.yml), the generated tooling pins (build-deps.yml), and
-// the image package list (rootfs.yml). It is a neutral configuration package
+// the per-variant image package lists (rootfs-<label>.yml). It is a neutral configuration package
 // so that other packages can consume these shapes without importing each other.
 package buildcfg
 
@@ -9,6 +9,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
+	"strings"
 
 	"github.com/gardenlinux/glbx/internal/objstore"
 	"gopkg.in/yaml.v3"
@@ -195,10 +197,31 @@ type rootfsYML struct {
 	Packages []string `yaml:"packages"`
 }
 
-// LoadRootfsYML reads the image package list from rootfs.yml in dir. A missing
-// or malformed file yields nil.
-func LoadRootfsYML(dir string) []string {
-	data, err := os.ReadFile(filepath.Join(dir, "rootfs.yml"))
+// DiscoverRootfsLabels lists the image variants declared in dir. Each
+// rootfs-<label>.yml file names one variant; the returned labels are sorted.
+// rootfs-deps.yml is the shared image-configuration tooling lock, not a variant,
+// and is excluded.
+func DiscoverRootfsLabels(dir string) []string {
+	matches, err := filepath.Glob(filepath.Join(dir, "rootfs-*.yml"))
+	if err != nil {
+		return nil
+	}
+	var labels []string
+	for _, m := range matches {
+		label := strings.TrimSuffix(strings.TrimPrefix(filepath.Base(m), "rootfs-"), ".yml")
+		if label == "" || label == "deps" {
+			continue
+		}
+		labels = append(labels, label)
+	}
+	sort.Strings(labels)
+	return labels
+}
+
+// LoadRootfsLabel reads the package list of the rootfs-<label>.yml variant in
+// dir. A missing or malformed file yields nil.
+func LoadRootfsLabel(dir, label string) []string {
+	data, err := os.ReadFile(filepath.Join(dir, "rootfs-"+label+".yml"))
 	if err != nil {
 		return nil
 	}

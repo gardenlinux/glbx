@@ -36,7 +36,7 @@ func cmdBuildCheckReproducible(args []string) error {
 	cacheDir := fs.String("cache", "", "cache directory")
 	confDir := fs.String("conf-dir", "", "configuration directory")
 	stubPath := fs.String("stub", "", "path to exec_env_stub binary")
-	target := fs.String("target", "", "check only the node with this Key (e.g. rootfs:amd64); otherwise check every node")
+	target := fs.String("target", "", "check only the node with this Key (e.g. rootfs:base:amd64); otherwise check every node")
 	report := fs.String("report", "", "write the JSON reproducibility report to this file (required)")
 	fs.Parse(args)
 

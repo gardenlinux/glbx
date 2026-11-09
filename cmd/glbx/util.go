@@ -5,17 +5,19 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/gardenlinux/glbx/internal/buildcfg"
 	"github.com/gardenlinux/glbx/internal/log"
 	"github.com/gardenlinux/glbx/internal/objstore"
 )
 
 // findConfDir walks up from the working directory to the working-tree root,
-// identified by a pkgs/ directory alongside a rootfs.yml.
+// identified by a pkgs/ directory alongside at least one rootfs-<label>.yml
+// image variant.
 func findConfDir() string {
 	dir, _ := os.Getwd()
 	for {
 		if _, err := os.Stat(filepath.Join(dir, "pkgs")); err == nil {
-			if _, err := os.Stat(filepath.Join(dir, "rootfs.yml")); err == nil {
+			if len(buildcfg.DiscoverRootfsLabels(dir)) > 0 {
 				return dir
 			}
 		}

@@ -23,7 +23,7 @@ func cmdPublish(args []string) error {
 	arch := fs.String("arch", buildcfg.HostArch(), "target architecture")
 	cacheDir := fs.String("cache", "", "object-store cache directory")
 	registry := fs.String("registry", "", "target registry reference host[:port]/repo (default $GLBX_REGISTRY)")
-	target := fs.String("target", "", "publish only the built node with this Key (e.g. rootfs:amd64)")
+	target := fs.String("target", "", "publish only the built node with this Key (e.g. rootfs:base:amd64)")
 	stubPath := fs.String("stub", "", "path to exec_env_stub binary")
 	fs.Parse(args)
 

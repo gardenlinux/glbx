@@ -25,7 +25,7 @@ func cmdResolve(args []string) error {
 	fs.Parse(args)
 
 	if fs.NArg() < 1 {
-		return fmt.Errorf("usage: glbx resolve [--index <hash> | --repo <url>] [flags] <pkg1> [pkg2] ...\n\nResolves the given packages against a Packages index. Logs go to stderr; results to stdout.")
+		return fmt.Errorf("usage: glbx resolve [--index <hash> | --repo <url>] [flags] <pkg1> [pkg2] ...\n\nResolves the given packages against a Packages index. The pseudo-root ?essential expands to every Essential: yes package in the index. Logs go to stderr; results to stdout.")
 	}
 
 	ctx, l := rootContextStderr(log.Deps)
@@ -63,6 +63,17 @@ func cmdResolve(args []string) error {
 
 	var roots []resolver.Requirement
 	for _, name := range fs.Args() {
+		if name == "?essential" {
+			// Expand to every Essential: yes package in the index, as if each
+			// were named explicitly on the command line.
+			for _, pkg := range idx.EssentialPackages() {
+				roots = append(roots, resolver.Requirement{
+					Name:            pkg.Name,
+					VirtualEligible: true,
+				})
+			}
+			continue
+		}
 		roots = append(roots, resolver.Requirement{
 			Name:            name,
 			VirtualEligible: true,

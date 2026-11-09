@@ -36,6 +36,7 @@ const rootfsSeed = "62bf3b3274afbda97d1100a6b81d7230"
 //
 // Final output = Layer 0 + Layer 2 (Layer 1 is discarded).
 type Rootfs struct {
+	Label      string
 	Arch       string
 	DirectDeps []*debianBinaryPkg
 	store      *objstore.Store
@@ -46,6 +47,7 @@ type Rootfs struct {
 
 // RootfsConfig holds the parameters for constructing a new Rootfs artifact.
 type RootfsConfig struct {
+	Label    string
 	Arch     string
 	Store    *objstore.Store
 	PkgSet   *PackageSet
@@ -53,28 +55,30 @@ type RootfsConfig struct {
 	StubPath string
 }
 
-// NewRootfs creates a new Rootfs artifact. It reads rootfs.yml from BaseDir
-// and resolves src:pkg entries to binary package artifacts via the PackageSet.
+// NewRootfs creates a new Rootfs variant artifact. It reads
+// rootfs-<label>.yml from BaseDir and resolves src:pkg entries to binary
+// package artifacts via the PackageSet.
 func NewRootfs(cfg RootfsConfig) (*Rootfs, error) {
-	entries := buildcfg.LoadRootfsYML(cfg.BaseDir)
+	entries := buildcfg.LoadRootfsLabel(cfg.BaseDir, cfg.Label)
 	if len(entries) == 0 {
-		return nil, fmt.Errorf("no rootfs.yml found (or empty) in %s", cfg.BaseDir)
+		return nil, fmt.Errorf("no rootfs-%s.yml found (or empty) in %s", cfg.Label, cfg.BaseDir)
 	}
 
 	var deps []*debianBinaryPkg
 	for _, spec := range entries {
 		parts := strings.SplitN(spec, ":", 2)
 		if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
-			return nil, fmt.Errorf("rootfs.yml: %q must be in src:pkg format", spec)
+			return nil, fmt.Errorf("rootfs-%s.yml: %q must be in src:pkg format", cfg.Label, spec)
 		}
 		bp, err := cfg.PkgSet.Binary(parts[0], parts[1])
 		if err != nil {
-			return nil, fmt.Errorf("rootfs.yml: %w", err)
+			return nil, fmt.Errorf("rootfs-%s.yml: %w", cfg.Label, err)
 		}
 		deps = append(deps, bp)
 	}
 
 	return &Rootfs{
+		Label:      cfg.Label,
 		Arch:       cfg.Arch,
 		DirectDeps: deps,
 		store:      cfg.Store,
@@ -84,12 +88,13 @@ func NewRootfs(cfg RootfsConfig) (*Rootfs, error) {
 }
 
 func (r *Rootfs) Key() string {
-	return fmt.Sprintf("rootfs:%s", r.Arch)
+	return fmt.Sprintf("rootfs:%s:%s", r.Label, r.Arch)
 }
 
 // newRootfsDirect creates a Rootfs with explicit deps (for testing).
-func newRootfsDirect(arch string, deps []*debianBinaryPkg, store *objstore.Store) *Rootfs {
+func newRootfsDirect(label, arch string, deps []*debianBinaryPkg, store *objstore.Store) *Rootfs {
 	return &Rootfs{
+		Label:      label,
 		Arch:       arch,
 		DirectDeps: deps,
 		store:      store,
@@ -97,7 +102,7 @@ func newRootfsDirect(arch string, deps []*debianBinaryPkg, store *objstore.Store
 }
 
 func (r *Rootfs) ShortName() string {
-	return "rootfs"
+	return "rootfs-" + r.Label
 }
 
 func (r *Rootfs) Depends() []artifact.Artifact {
@@ -144,7 +149,7 @@ func (r *Rootfs) Identity() (objstore.Hash, error) {
 		return r.identity, nil
 	}
 
-	parts := []string{artifact.IDSeed(), rootfsSeed, r.Arch}
+	parts := []string{artifact.IDSeed(), rootfsSeed, r.Label, r.Arch}
 
 	// Fold the content hash of every pinned image-tooling file.
 	if tools, err := r.loadImageToolingPins(); err == nil {
