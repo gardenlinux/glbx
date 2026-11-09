@@ -380,10 +380,21 @@ func (r *Resolver) explainNoCandidates(atoms depends.Alternative) string {
 
 // workItem represents a pending item in the work queue.
 type workItem struct {
-	pkg     string   // concrete package name to select (empty if virtual choice)
+	pkg     string   // concrete package name to select (empty if a choice)
 	virtual string   // virtual name (non-empty if this is a virtual choice)
-	cands   []string // candidates for virtual choice
+	cands   []string // candidates for a virtual or deferred-group choice
 	chain   []string // dependency chain that led here
+
+	// choice marks a deferred multi-candidate dependency-group decision: the
+	// group's candidates are in cands and its real atoms in atoms. Deferring the
+	// decision onto the queue — rather than making it inline while a package's
+	// groups are still being enqueued — ensures the decision's queue snapshot
+	// captures the package's other (already-enqueued) dependency groups, so
+	// backtracking to it restores them. depender names the package the group
+	// belongs to.
+	choice   bool
+	depender string
+	atoms    depends.Alternative
 }
 
 // decision records a decision point for backtracking.
@@ -465,6 +476,13 @@ func (s *solverState) propagateInner() *conflict {
 
 		if item.virtual != "" {
 			if err := s.handleVirtualChoice(item); err != nil {
+				return err
+			}
+			continue
+		}
+
+		if item.choice {
+			if err := s.handleGroupChoice(item); err != nil {
 				return err
 			}
 			continue
@@ -558,6 +576,41 @@ func (s *solverState) handleVirtualChoice(item workItem) *conflict {
 	return nil
 }
 
+// handleGroupChoice resolves a deferred multi-candidate dependency group when
+// it reaches the front of the queue. By this point the depender's other
+// dependency groups have been enqueued, so the decision's queue snapshot
+// captures them and a later backtrack to this decision restores them.
+func (s *solverState) handleGroupChoice(item workItem) *conflict {
+	// Re-filter against current state: candidates may have been selected or
+	// excluded since this item was enqueued.
+	var viable []string
+	for _, c := range item.cands {
+		if _, ok := s.selected[c]; ok {
+			return nil // already satisfied
+		}
+		if _, ok := s.excluded[c]; !ok {
+			viable = append(viable, c)
+		}
+	}
+
+	if len(viable) == 0 {
+		return &conflict{
+			pkg:     item.depender,
+			chain:   item.chain,
+			message: fmt.Sprintf("%s depends on %s, all candidates excluded", item.depender, formatAtoms(item.atoms)),
+		}
+	}
+
+	if len(viable) == 1 {
+		s.enqueue(viable[0], item.chain)
+		return nil
+	}
+
+	ranked := s.resolver.rankCandidates(viable, item.atoms, s.selected)
+	s.makeDecision(item.depender, item.atoms, ranked, item.chain)
+	return nil
+}
+
 // processDepGroups processes dependency groups for a selected package.
 func (s *solverState) processDepGroups(pkg string, parentChain []string, groups []depGroup) *conflict {
 	for _, g := range groups {
@@ -607,9 +660,16 @@ func (s *solverState) processDepGroups(pkg string, parentChain []string, groups 
 			continue
 		}
 
-		// Multiple choices: make a decision.
-		ranked := s.resolver.rankCandidates(viable, g.atoms, s.selected)
-		s.makeDecision(pkg, g.atoms, ranked, chain)
+		// Multiple choices: defer the decision onto the queue so the rest of
+		// this package's dependency groups are enqueued first and captured in
+		// the decision's snapshot.
+		s.queue = append(s.queue, workItem{
+			choice:   true,
+			depender: pkg,
+			atoms:    g.atoms,
+			cands:    viable,
+			chain:    chain,
+		})
 	}
 	return nil
 }
