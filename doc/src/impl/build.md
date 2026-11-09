@@ -61,10 +61,15 @@ store meet.
   each local-tooling build's identity — so a change to the rootfs, the script, the
   tool set, or a local tool rebuilds it. Its Depends are the one `Rootfs` node and
   each local-tooling `ToolingPkgBuild` (the only cross-universe edges). Its build
-  action raw-extracts the pinned assembly tooling into a container root, overlays
-  each local-tooling `.deb` on top (local overrides mirror), stages the rootfs
+  action raw-extracts the pinned assembly tooling into a container root (local
+  tooling overriding same-named mirror packages), then `dpkg --unpack` +
+  `--configure --pending` registers and configures them so maintainer scripts run
+  and alternatives resolve — the container is a real working system, not a bag of
+  files. It stages the rootfs
   tarball read-only and the assembly script, runs the script by its shebang with
-  `CAP_SYS_ADMIN` and no loop device (`$1` the rootfs, `$2` the output path), and
+  `CAP_SYS_ADMIN` and no loop device (`$1` the rootfs, `$2` the output path, and
+  `GLBX_IMAGE_ID` in the environment carrying the image identity for deriving
+  deterministic on-disk identifiers), and
   harvests the written image from the staging mount namespace into the store
   under the single output name `image`.
 

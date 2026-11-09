@@ -220,8 +220,28 @@ func (im *Image) Build(ctx artifact.BuildContext) ([]artifact.Output, error) {
 
 	// Populate the assembly container root: the pinned tooling closure first,
 	// then each local-tooling .deb on top so a local tool overrides the mirror.
+	// Raw extraction only places files; the packages are registered and
+	// configured with dpkg below so maintainer scripts run and alternatives
+	// (awk, etc.) resolve — the container is a real working system, not a bag of
+	// files.
 	if err := extractDebsRaw(ctx.Ctx, mountNS, store, toolingPkgs, rootfsDir, log.Rootfs); err != nil {
 		return nil, fmt.Errorf("extract assembly tooling: %w", err)
+	}
+	// The local-tooling .debs override same-named pinned tooling: drop the
+	// pinned copy so the local one is the only candidate dpkg configures.
+	localPkgs, err := im.localToolingPkgs(ctx.Inputs, store)
+	if err != nil {
+		return nil, err
+	}
+	localNames := make(map[string]bool, len(localPkgs))
+	for _, p := range localPkgs {
+		localNames[p.Name] = true
+	}
+	var containerPkgs []*index.Package
+	for _, p := range toolingPkgs {
+		if !localNames[p.Name] {
+			containerPkgs = append(containerPkgs, p)
+		}
 	}
 	for _, l := range im.local {
 		hash, ok := ctx.Inputs[l.output]
@@ -239,6 +259,16 @@ func (im *Image) Build(ctx artifact.BuildContext) ([]artifact.Output, error) {
 		}); err != nil {
 			return nil, fmt.Errorf("extract local tooling %s: %w", l.output, err)
 		}
+	}
+	containerPkgs = append(containerPkgs, localPkgs...)
+
+	// The dpkg database directories the configure step writes into, plus /pkgs
+	// holding every .deb for `dpkg --unpack`.
+	if err := setupDirsInMountNS(mountNS, rootfsDir); err != nil {
+		return nil, fmt.Errorf("setup dpkg dirs: %w", err)
+	}
+	if err := setupLocalRepoInMountNS(mountNS, store, containerPkgs, rootfsDir); err != nil {
+		return nil, fmt.Errorf("stage assembly .debs: %w", err)
 	}
 
 	for _, d := range []string{"proc", "sys", "dev", "tmp", "run"} {
@@ -289,16 +319,46 @@ func (im *Image) Build(ctx artifact.BuildContext) ([]artifact.Output, error) {
 		return nil, fmt.Errorf("create container: %w", err)
 	}
 
+	// Register and configure every staged .deb so maintainer scripts run and
+	// alternatives are wired up, turning the raw-extracted tree into a working
+	// system the assembly script can rely on. Unpack-all-then-configure breaks
+	// the essential set's pre-dependency cycles, the same bootstrap the rootfs
+	// and source builds use.
+	rootEnv := []string{"HOME=/root", "LANG=C.UTF-8", "DEBIAN_FRONTEND=noninteractive"}
+	l.Info("dpkg --unpack --force-depends (%d assembly packages)", len(containerPkgs))
+	if err := execIn(ctx.Ctx, cont, rootEnv, nil, "/", "sh", "-c",
+		"dpkg --unpack --force-depends /pkgs/*.deb"); err != nil {
+		cont.Close()
+		return nil, fmt.Errorf("dpkg --unpack: %w", err)
+	}
+	l.Info("dpkg --configure --pending")
+	if err := execIn(ctx.Ctx, cont, rootEnv, nil, "/", "dpkg", "--configure", "--pending"); err != nil {
+		cont.Close()
+		return nil, fmt.Errorf("dpkg --configure --pending: %w", err)
+	}
+
 	// In-container paths: the staging dir is at /glbx-image after pivot_root.
 	const inScript = "/glbx-image/build"
 	const inRootfs = "/glbx-image/rootfs.tar.gz"
 	const inOutput = "/glbx-image/image.out"
+
+	// The image's identity is exposed to the script so it can derive every
+	// otherwise-random on-disk identifier (filesystem/partition/disk UUIDs, hash
+	// seeds) deterministically from it — the image already folds the rootfs, the
+	// script, and the tooling, so keying identifiers off the identity makes them
+	// a pure function of the same inputs.
+	identity, err := im.Identity()
+	if err != nil {
+		cont.Close()
+		return nil, fmt.Errorf("image identity: %w", err)
+	}
 
 	l.Info("running assembly script")
 	if err := execIn(ctx.Ctx, cont, []string{
 		"HOME=/root",
 		"LANG=C.UTF-8",
 		"PATH=/usr/sbin:/usr/bin:/sbin:/bin",
+		"GLBX_IMAGE_ID=" + identity.String(),
 	}, nil, "/", inScript, inRootfs, inOutput); err != nil {
 		cont.Close()
 		return nil, fmt.Errorf("assembly script: %w", err)
@@ -329,6 +389,38 @@ func (im *Image) loadAssemblyTooling() ([]*index.Package, error) {
 		return nil, err
 	}
 	return idx.All(), nil
+}
+
+// localToolingPkgs builds index packages for the local-tooling .debs resolved
+// in inputs, reading each control stanza from its blob and recording the blob
+// hash as SHA256 so the dpkg staging step can bind and configure them.
+func (im *Image) localToolingPkgs(inputs map[string]objstore.Hash, store *objstore.Store) ([]*index.Package, error) {
+	var pkgs []*index.Package
+	seen := make(map[string]bool)
+	for _, l := range im.local {
+		hash, ok := inputs[l.output]
+		if !ok {
+			return nil, fmt.Errorf("image %s: local tooling %q not in resolved inputs", im.Name, l.output)
+		}
+		blobPath, err := store.Blobs.Path(hash)
+		if err != nil {
+			return nil, fmt.Errorf("local tooling blob %s: %w", l.output, err)
+		}
+		control, err := debControl(blobPath)
+		if err != nil {
+			return nil, fmt.Errorf("local tooling %s: read control: %w", l.output, err)
+		}
+		control["sha256"] = hash.String()
+		pkg, err := index.ParsePackageFromStanza(control)
+		if err != nil {
+			return nil, fmt.Errorf("local tooling %s: %w", l.output, err)
+		}
+		if !seen[pkg.Name] {
+			seen[pkg.Name] = true
+			pkgs = append(pkgs, pkg)
+		}
+	}
+	return pkgs, nil
 }
 
 // hashFile returns the hex SHA-256 of a file's content.
