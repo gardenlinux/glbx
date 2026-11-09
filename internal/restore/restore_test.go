@@ -297,3 +297,62 @@ func writeTree(t *testing.T, root string, files map[string]string) {
 		}
 	}
 }
+
+// collectItems must also enumerate the image layer: image-assembly tooling
+// packages (images.d/tooling/<name>/{sources,build-deps}.yml) and each image
+// type's assembly lock (images.d/<type>/tooling-deps.yml). Missing these is
+// what left a tooling build's chroot .debs unmirrored to the registry.
+func TestCollectItemsIncludesImageLayer(t *testing.T) {
+	root := t.TempDir()
+	writeTree(t, root, map[string]string{
+		// A minimal shipped package + rootfs so the base enumeration is non-empty.
+		"pkgs/foo/sources.yml": `sources:
+  - file: foo_1.0.orig.tar.gz
+    sha256: ` + hex64('a') + `
+    urls: [https://m/foo.tar.gz]
+`,
+		// A tooling package: its source archive and a build-tooling .deb.
+		"images.d/tooling/mv-data/sources.yml": `sources:
+  - file: mv-data_1.0.orig.tar.gz
+    sha256: ` + hex64('b') + `
+    urls: [https://m/mv.tar.gz]
+`,
+		"images.d/tooling/mv-data/build-deps.yml": `tools:
+  - name: cron
+    version: "1"
+    files:
+      - arch: amd64
+        sha256: ` + hex64('c') + `
+        urls: [https://m/cron_amd64.deb]
+`,
+		// An image type with an assembly-tooling lock. conf.yml marks it a type.
+		"images.d/gpt-ext4/conf.yml": "debian_tooling: [fdisk]\n",
+		"images.d/gpt-ext4/tooling-deps.yml": `tools:
+  - name: fdisk
+    version: "1"
+    files:
+      - arch: amd64
+        sha256: ` + hex64('d') + `
+        urls: [https://m/fdisk_amd64.deb]
+`,
+	})
+
+	items, err := collectItems(root, "amd64")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]bool{}
+	for _, it := range items {
+		got[it.hash.String()] = true
+	}
+	for name, h := range map[string]rune{
+		"shipped source":         'a',
+		"tooling source":         'b',
+		"tooling build-dep cron": 'c',
+		"image-type lock fdisk":  'd',
+	} {
+		if !got[hex64(h)] {
+			t.Errorf("missing %s (%c) from restore set: %v", name, h, got)
+		}
+	}
+}
