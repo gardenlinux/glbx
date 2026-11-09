@@ -109,6 +109,20 @@ func (o *TaskOverview) MoveDown() {
 	}
 }
 
+// MoveToNextInProgress jumps the selection to the first in-progress task after
+// the current one. If none follow, the selection is left unchanged.
+func (o *TaskOverview) MoveToNextInProgress() {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	tasks := o.tracker.Tasks()
+	for i := o.selected + 1; i < len(tasks); i++ {
+		if tasks[i].State() == InProgress {
+			o.selected = i
+			return
+		}
+	}
+}
+
 func (o *TaskOverview) Selected() int {
 	o.mu.Lock()
 	defer o.mu.Unlock()
@@ -219,6 +233,9 @@ func (o *TaskOverview) inputLoop() {
 				o.MoveDown()
 				o.triggerRedraw()
 			}
+		} else if nRead == 1 && buf[0] == 'n' {
+			o.MoveToNextInProgress()
+			o.triggerRedraw()
 		} else if nRead == 1 && (buf[0] == '\n' || buf[0] == '\r') {
 			if o.OnEnter != nil {
 				tasks := o.tracker.Tasks()
