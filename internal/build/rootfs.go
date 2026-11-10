@@ -487,12 +487,13 @@ func (r *Rootfs) runDpkg(ctx context.Context, mountNS *container.MountNS, store 
 	}
 
 	// Tear down the conf.d staging area the same way, before the overlay is
-	// unmounted, so the setup scripts are not recorded in the packed rootfs. A
-	// no-op when no scripts ran (the directory was never created).
+	// unmounted, so the setup scripts are not recorded in the packed rootfs. The
+	// directory is always present (runConfScripts creates it unconditionally),
+	// empty when the variant ships no scripts.
 	if err := removeDirContents(mountNS, paths.merged+confScriptDir); err != nil {
 		return fmt.Errorf("clear conf.d staging: %w", err)
 	}
-	if err := mountNS.Rmdir(paths.merged + confScriptDir); err != nil && !os.IsNotExist(err) {
+	if err := mountNS.Rmdir(paths.merged + confScriptDir); err != nil {
 		return fmt.Errorf("remove conf.d staging dir: %w", err)
 	}
 
@@ -507,15 +508,21 @@ func (r *Rootfs) runDpkg(ctx context.Context, mountNS *container.MountNS, store 
 // never appears in the output.
 const confScriptDir = "/glbx-conf.d"
 
-// runConfScripts copies the executable files of the variant's
-// rootfs-<label>.conf.d directory into the merged overlay and runs each inside
-// the container, in byte-wise name order, with the rootfs as /. Scripts are run
-// by their shebang (#!/bin/bash); a non-zero exit fails the build. A missing or
-// empty conf.d directory is a no-op. A script reached through a symlink is read
-// with the symlink followed, so one variant's conf.d may link to another's to
-// share a single source.
+// runConfScripts creates the conf.d staging directory in the merged overlay,
+// then copies the executable files of the variant's rootfs-<label>.conf.d
+// directory into it and runs each inside the container, in byte-wise name order,
+// with the rootfs as /. Scripts are run by their shebang (#!/bin/bash); a
+// non-zero exit fails the build. A missing or empty conf.d directory leaves the
+// staging directory empty. A script reached through a symlink is read with the
+// symlink followed, so one variant's conf.d may link to another's to share a
+// single source. The staging directory is always created so the caller's
+// teardown can remove it unconditionally.
 func (r *Rootfs) runConfScripts(ctx context.Context, cont *container.Container, mountNS *container.MountNS, env []string, paths *rootfsPaths) error {
 	l := log.From(ctx, log.Rootfs)
+
+	if err := mountNS.Mkdir(paths.merged+confScriptDir, 0755); err != nil {
+		return fmt.Errorf("mkdir conf.d staging: %w", err)
+	}
 
 	confDir := filepath.Join(r.baseDir, "rootfs-"+r.Label+".conf.d")
 	entries, err := os.ReadDir(confDir)
@@ -540,10 +547,6 @@ func (r *Rootfs) runConfScripts(ctx context.Context, cont *container.Container, 
 		return nil
 	}
 	sort.Strings(names)
-
-	if err := mountNS.Mkdir(paths.merged+confScriptDir, 0755); err != nil {
-		return fmt.Errorf("mkdir conf.d staging: %w", err)
-	}
 
 	for _, name := range names {
 		data, err := os.ReadFile(filepath.Join(confDir, name))
