@@ -56,3 +56,22 @@ func goArchToDebian(goarch string) string {
 		return goarch
 	}
 }
+
+// ArchPlaceholder is the token used in hand-authored config (rootfs package
+// lists, build.yml runtime_depends) to stand in for the target Debian
+// architecture. It is substituted with the concrete arch at build time so a
+// single configuration serves every architecture rather than hard-coding one.
+// Debian binary package names for arch-specific flavours (notably the kernel's
+// linux-image-...-cloud-<arch>) embed the architecture, so without this a config
+// would only resolve on the one architecture its names were written for.
+const ArchPlaceholder = "%ARCH%"
+
+// SubstArch replaces every ArchPlaceholder in s with the given Debian
+// architecture. Strings without the placeholder are returned unchanged, so this
+// is a no-op for the arch-independent majority of package refs.
+func SubstArch(s, arch string) string {
+	if !strings.Contains(s, ArchPlaceholder) {
+		return s
+	}
+	return strings.ReplaceAll(s, ArchPlaceholder, arch)
+}

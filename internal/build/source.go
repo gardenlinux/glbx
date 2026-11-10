@@ -165,7 +165,7 @@ func (s *DebianPkgBuild) resolveDeps() {
 		return
 	}
 	for _, depSpec := range buildYML.BuildDepends {
-		src, bin, ok := strings.Cut(depSpec, ":")
+		src, bin, ok := strings.Cut(buildcfg.SubstArch(depSpec, s.Arch), ":")
 		if !ok {
 			continue
 		}
