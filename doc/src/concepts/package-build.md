@@ -30,6 +30,16 @@ the input a downstream artifact depends on at runtime. The per-binary validation
 stage described below in particular draws nearly all of its inputs from our own
 builds.
 
+This is the system's load-bearing distinction, and it is worth stating as a rule
+about what may ship. **Build-time tooling** need not be built from source: it is an
+external input, pinned by content hash, fine to take from Debian, and it ends up in
+no image. **Output binaries** — everything a shipped image consumes — must,
+transitively, be buildable from sources under control. The two populations must not
+be confused, and the per-binary validation stage below is the gate that keeps them
+apart: a binary we actually ship must have a runtime closure that resolves entirely
+to other locally built binaries, so what reaches an image is exactly what was built
+from controlled sources.
+
 What has to be pinned is the external slice. A locally built input is already
 fully determined — its content hash rolls up from its own source and inputs, so
 the artifact graph pins it by construction. An external `.deb` has no such
@@ -49,7 +59,7 @@ A source package's external build-time inputs are pinned in a
 not on the pristine lineage, since the pin is a resolution against a moving
 archive at a moment in time, not part of upstream source (see
 [source-lineage.md](./source-lineage.md) and
-[ARCHITECTURE.md](./architecture.md) §5). The pin is **per package**: each
+[the architecture chapter](./architecture.md)). The pin is **per package**: each
 package locks its own tooling, so bumping a tool one package needs does not
 force every other package to rebuild.
 
@@ -204,7 +214,7 @@ sandbox so that it sees only its declared inputs and leaves the host untouched.
 ### Assembling the build chroot
 
 The sandbox is built from Linux namespaces directly (user, mount, PID — see
-[ARCHITECTURE.md](./architecture.md) §4). Into a private root filesystem the
+[the architecture chapter](./architecture.md)). Into a private root filesystem the
 build assembles:
 
 1. **The build-time tooling.** For the target architecture, the relevant files
@@ -260,6 +270,21 @@ used. The build is therefore modelled as two distinct artifact kinds:
 A binary-package artifact is instantiated only when something downstream depends
 on that binary. Downstream dependencies always point at binary-package
 artifacts, never directly at the source build.
+
+```mermaid
+flowchart TD
+    src["openssl source build<br/>(dpkg-buildpackage,<br/>emits every .deb)"]
+    src --> lib["binary: libssl3t64<br/>(validate + re-emit)"]
+    src --> prov["binary: openssl-provider-legacy"]
+    src --> unused["libssl-dev, …<br/>(emitted, never selected,<br/>no binary node)"]
+    lib <-->|Includes| prov
+    consumer["a downstream artifact"] -->|Depends| lib
+    style unused stroke-dasharray: 4 4
+```
+
+*One source build emits every `.deb`; a validating binary node exists only for the
+binaries something downstream actually selects, so an unused output is never
+inspected and never blocks the package.*
 
 ### Why re-emit through a validating binary stage
 
@@ -333,6 +358,19 @@ binary stage's install and locality checks then confirm the produced binary is
 compatible with the libc we ship, without having forced a rebuild when that libc
 moved. The same reasoning applies to most shared libraries.
 
+```mermaid
+flowchart TD
+    tooling["pinned tooling libc<br/>(build-deps.yml, external)"] -.->|compile against| build["a package's source build"]
+    build --> bin["its output binary"]
+    bin -->|"runtime_depends<br/>(light edge, no rebuild)"| libc["glibc:libc6<br/>(locally built)"]
+    libc -. "a build_depends edge here would<br/>rebuild the whole distribution" .-> build
+    linkStyle 3 stroke-dasharray:4 4,stroke:#c0392b
+```
+
+*The real libc enters a package through its binaries' `runtime_depends`, not a
+compile-time edge, so a libc change does not cascade a rebuild — the dashed edge is
+the one deliberately not taken.*
+
 The exception is genuine tight coupling: where a package must be built against
 the exact version of a dependency it will run against — ABI-sensitive pairings,
 or anything where building against the tooling copy and running against ours is
@@ -345,4 +383,4 @@ the maximum degree of parallelism.
 
 - Where the source comes from: [source-lineage.md](./source-lineage.md).
 - The artifact, identity, object-store, and sandbox concepts this builds on:
-  [ARCHITECTURE.md](./architecture.md).
+  [the architecture chapter](./architecture.md).

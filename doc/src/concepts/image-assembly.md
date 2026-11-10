@@ -9,7 +9,7 @@ and [exec-env.md](./exec-env.md) gives the sandbox whose split between a staging
 mount namespace and an inner pivoted run is what makes the layering trick below
 practical.
 
-The sketch ([ARCHITECTURE.md](./architecture.md) §6) states the shape in one
+The architecture chapter states the shape in one
 breath: take the runtime closure of a chosen set of packages, install them into
 a fresh root filesystem, and pack the result deterministically — and this is
 the step where the from-source guarantee is enforced. This document fixes the
@@ -220,12 +220,15 @@ disk image to that path and exits. The image's identity is passed in the
 environment as `GLBX_IMAGE_ID`, so the script can derive every on-disk
 identifier a tool would otherwise randomize — filesystem, partition and disk
 UUIDs, hash seeds — deterministically from it rather than from `/dev/urandom`.
-It runs with the capability to mount a tmpfs
-but is handed no loop device, so a type populates a filesystem from a directory
-tree rather than by mounting one. glbx stores whatever bytes the script writes
-and content-addresses them, exactly as it does the rootfs tarball. A single
-image type is reusable across rootfs variants, and the top-level image spec is
-where each concrete rootfs×type pairing is named.
+The script runs inside the sandbox with broad capabilities — enough to mount a
+tmpfs for its own scratch space — but **no loop device is set up for it**, so a
+type populates a filesystem from a directory tree (`mke2fs -d`, and the like)
+rather than by mounting a block device and copying into it. This is a property of
+what the sandbox provides, not a privilege glbx withholds to constrain the script:
+there is simply no loop device in the environment to use. glbx stores whatever
+bytes the script writes and content-addresses them, exactly as it does the rootfs
+tarball. A single image type is reusable across rootfs variants, and the top-level
+image spec is where each concrete rootfs×type pairing is named.
 
 ### Per-image inputs
 
@@ -252,6 +255,28 @@ image rebuilds the one that embeds it. This is the one place images relate to
 each other, and it is an ordinary graph edge like every other
 ([artifact-model.md](./artifact-model.md)): an image that consumes another's
 output simply Depends on it.
+
+For example, in the reference configuration the `disk` image takes the `initrd`
+image as an input and places it on the EFI partition, while the `initrd` image
+takes a literal `value` naming the kernel modules to include:
+
+```mermaid
+flowchart TD
+    core["coreutils"] -->|Depends| rootfs_b["rootfs: base"]
+    bash["bash"] -->|Depends| rootfs_b
+    libc["libc"] -->|Depends| rootfs_b
+    systemd["systemd"] -->|Depends| rootfs_b
+    more["..."] -->|Depends| rootfs_b
+    rootfs_b -->|Depends| disk["image: disk<br/>(GPT + ext4 + ESP)"]
+    modules["value: virtio_blk"] -->|input| initrd["image: initrd<br/>(cpio initramfs)"]
+    pkgs_i["..."] -->|Depends| rootfs_i["rootfs: initrd"]
+    rootfs_i -->|Depends| initrd
+    initrd -->|"image input (Depends)"| disk
+```
+
+*A `value` input is written as a plain file; an `image` input is another image's
+output, which makes it a build dependency — the `disk` image is rebuilt if the
+`initrd` it embeds changes.*
 
 ### The assembly tooling universe
 
@@ -282,7 +307,7 @@ the payload overrides the throwaway tooling during rootfs assembly.
 
 ### Determinism is the image type's contract
 
-[ARCHITECTURE.md](./architecture.md) §6 and the tarball discussion above set the
+[the architecture chapter](./architecture.md) and the tarball discussion above set the
 bar: an artifact's output must be a pure function of its inputs. For a disk image
 that bar is a **contract the image type must honor**, not something glbx can
 enforce from outside. glbx stores whatever bytes land at the script's output
@@ -368,4 +393,4 @@ operation as every node beneath it is the whole point of the model.
   [artifact-model.md](./artifact-model.md).
 - The staging-vs-pivot split that lets inputs be mounted and the result packed
   from outside the chroot: [exec-env.md](./exec-env.md).
-- The high-level shape this fits into: [ARCHITECTURE.md](./architecture.md) §6.
+- The high-level shape this fits into: [the architecture chapter](./architecture.md).

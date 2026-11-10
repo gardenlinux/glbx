@@ -2,8 +2,7 @@
 
 This document describes the layout and git conventions of the **source
 repository** — the repository glbx builds *from*. It concretizes the source
-lineage introduced in the architecture sketch
-([ARCHITECTURE.md](./architecture.md) §"Source lineage").
+lineage summarized in [the architecture chapter](./architecture.md).
 
 The source repository is distinct from glbx itself. glbx is the build executor;
 it carries no packages. The packages, their upstream history, and their
@@ -44,6 +43,22 @@ begin/end marker lines, carrying:
 - the *auto-update source* the version logically tracks (e.g. `debian:testing`),
   which marks whether and from where the package may later be refreshed
   automatically.
+
+The marker is the body of an otherwise ordinary commit, for example an import of
+`glibc`:
+
+```text
+import glibc 2.43-6 from debian
+
+---BEGIN PKG IMPORT METADATA---
+pkg: glibc
+version: 2.43-6
+auto_update: debian:testing
+---END   PKG IMPORT METADATA---
+```
+
+The begin and end lines are matched exactly and in full, never as substrings, so a
+mention of the marker elsewhere in a message cannot be mistaken for one.
 
 The auto-update source names the *logical series* a lineage follows, which is
 distinct from the physical location an import's bytes were pulled from. An import
@@ -98,7 +113,7 @@ A pristine import commit records **only upstream source**: the content needed to
 reconstruct exactly what Debian shipped for that version. It holds no local
 patches, no integration configuration, and no build-time tooling pins — tooling
 pins are a resolution against a moving archive at a moment in time, so they live
-on the integration side ([ARCHITECTURE.md](./architecture.md) §5), not on the
+on the integration side ([the architecture chapter](./architecture.md)), not on the
 upstream chain.
 
 What the committed content looks like depends on the Debian source format. Two
@@ -163,7 +178,7 @@ snapshot is only ever hit on this cold path, its slow performance is an
 acceptable price for always having a way back.
 
 The schema mirrors the `files` arrays in the build-input pins on the integration
-side ([ARCHITECTURE.md](./architecture.md) §5): the same `sha256` + ordered
+side ([the architecture chapter](./architecture.md)): the same `sha256` + ordered
 `urls` shape for a pinned, content-addressed input, so both read alike. The
 difference is only what varies per entry — upstream archives split by *component*
 rather than by architecture, as orig tarballs are architecture-independent.
@@ -195,8 +210,48 @@ full ancestry of both sides, so the upstream chain stays visible through it.
 Local packaging changes and the pinned build inputs are then ordinary commits on
 the integration branch, on top of the merged-in upstream state.
 
+```mermaid
+gitGraph
+    commit id: "initial"
+    branch glibc
+    branch coreutils
+    checkout glibc
+    commit id: "glibc 2.42-16"
+    checkout main
+    merge glibc id: "merge glibc 2.42-16"
+    commit id: "glibc build deps"
+    checkout coreutils
+    commit id: "coreutils 9.7-3"
+    checkout main
+    merge coreutils id: "merge coreutils 9.7-3"
+    commit id: "coreutils build deps"
+    checkout glibc
+    commit id: "glibc 2.42-17"
+    checkout main
+    merge glibc id: "merge glibc 2.42-17"
+    commit id: "glibc build deps (2)"
+    checkout coreutils
+    commit id: "coreutils 9.8-1"
+    checkout main
+    merge coreutils id: "merge coreutils 9.8-1"
+    checkout glibc
+    commit id: "glibc 2.43-3"
+    checkout coreutils
+    commit id: "coreutils 9.10-1"
+```
+
+*Each package has its own pristine import chain, and `main` merges imports in
+repeatedly as they are adopted — glibc, then coreutils, then the next glibc — with
+a lockfile bump (`build deps`) and any local commits in between, so there is a
+merge point per adopted version rather than a single one. The newest imports on
+each lineage (glibc 2.43-3, coreutils 9.10-1) are recorded but not yet merged. Two
+things the drawing cannot show faithfully: each lineage is really an **orphan
+root** with no common ancestor with `main` — it relates to `main` only through its
+first merge, not through a shared `initial` commit as `gitGraph` must draw it — and
+each merge brings in one specific import, not a whole moving branch.*
+
 The mechanics of integration — where a package's tree sits on an integration
 branch, how an update is proposed and merged, how pins are attached, and how
-this is automated — are covered in their own documents. This one fixes the layer
-beneath them: what upstream history looks like, and what each pristine commit
-may contain.
+this is automated — are covered in [Distributed builds & CI](./distributed-builds.md).
+This one fixes the layer beneath them: what upstream history looks like, and what
+each pristine commit may contain.
