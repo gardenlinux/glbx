@@ -1,8 +1,7 @@
 # Artifact Model
 
 This document defines the one abstraction the whole build engine is built on:
-the **artifact**. The architecture sketch
-([ARCHITECTURE.md](./architecture.md) §1–§2) states the central idea — every
+the **artifact**. [The architecture chapter](./architecture.md) states the central idea — every
 build output is an artifact with an identity derived from its inputs, looked up
 in a content-addressed store and either reused or built. [package-build.md](./package-build.md)
 already works in these terms, modelling a source build and a binary package as
@@ -102,6 +101,18 @@ versa, and any binary that Depends on `libssl3t64` pulls `openssl-provider-legac
 into its runtime closure too — without either sibling waiting on the other to
 build.
 
+```mermaid
+flowchart TD
+    build["openssl source build"] -->|Depends| A["libssl3t64"]
+    build -->|Depends| B["openssl-provider-legacy"]
+    A <-->|Includes| B
+    C["a consumer"] -->|Depends| A
+    C -.->|"closure pulls in"| B
+```
+
+*Depends edges impose build order and fold into identity; the Includes cycle
+between the two siblings imposes neither, but a consumer of one carries both.*
+
 ## What determines an artifact's identity
 
 The engine never looks inside an artifact to compute its identity; the artifact
@@ -187,7 +198,7 @@ artifact".
 
 ## See also
 
-- The high-level shape these pieces fit into: [ARCHITECTURE.md](./architecture.md).
+- The high-level shape these pieces fit into: [the architecture chapter](./architecture.md).
 - The source-build and binary-package artifacts, and their `build_depends` /
   `runtime_depends` edges, in concrete terms: [package-build.md](./package-build.md).
 - Where an artifact's source tree comes from: [source-lineage.md](./source-lineage.md).

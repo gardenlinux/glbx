@@ -1,7 +1,7 @@
 # The Object Store
 
-The object store is where results persist between builds. The architecture
-sketch ([ARCHITECTURE.md](./architecture.md) §3) names it as the system's one
+The object store is where results persist between builds.
+[The architecture chapter](./architecture.md) names it as the system's one
 place where anything is kept: everything the build might reuse — upstream
 archives, built `.deb`s, assembled images, the manifests that tie an artifact's
 outputs together — is a blob here, and everything else is derived from those.
@@ -196,6 +196,19 @@ effect of a read: the second time the same blob is read, it is a plain local hit
 and the remote is not consulted. This is what lets a reclaimed input or a
 CI-built output be restored transparently by the act of using it.
 
+```mermaid
+flowchart TD
+    read["read blob h"] --> q{"local has h?"}
+    q -->|yes| ret["return local bytes"]
+    q -->|no| fetch["fetch h from remote"]
+    fetch --> write["write into local store<br/>(re-hash → verify)"]
+    write --> reread["re-read h from local"]
+    reread --> ret
+```
+
+*A remote result is never handed back directly; it is written locally and re-read,
+so the caller always sees verified, local bytes and the next read is a plain hit.*
+
 The same shape applies to the operations that are not plain reads:
 
 - **Path** on the pull-through store must return a *local* path, so a path
@@ -261,6 +274,15 @@ is two sweeps, blobs first and the map second, the map following the blobs:
    its own keep-set — an entry's fate is dictated entirely by whether its target
    blob survived step 1.
 
+```mermaid
+flowchart LR
+    keep["keep-set<br/>(blobs only)"] --> s1["sweep 1: delete<br/>blobs not in keep-set"]
+    s1 --> s2["sweep 2: delete map entries<br/>whose blob is now gone"]
+```
+
+*The caller supplies a keep-set over blobs; the map is swept to follow, so an entry
+can never outlive the bytes it names.*
+
 Because the map is swept to match the blobs rather than against an independent
 policy, a map entry can never outlive its blob, and the caller never has to
 enumerate map entries to protect them — it keeps the *blobs* an artifact
@@ -306,4 +328,4 @@ free:
 - The external tooling `.deb`s recorded in `build-deps.yml` the same way:
   [package-build.md](./package-build.md).
 - The store's role as the system's cache of results and its intended remote
-  form: [ARCHITECTURE.md](./architecture.md) §3.
+  form: [the architecture chapter](./architecture.md).

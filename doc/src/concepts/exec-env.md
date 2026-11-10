@@ -301,6 +301,16 @@ the right unshare flags set — and the orchestrator drives it from outside over
 small control channel. This is why nesting only needs an ExecEnv underneath: a
 layer is created by running one process through the environment below it.
 
+```mermaid
+flowchart LR
+    orch["glbx orchestrator<br/>(outside every namespace)"]
+    orch <-->|"control channel<br/>(requests + fd passing)"| helper["helper process<br/>(inside the namespace)"]
+    helper --> op["runs processes &<br/>filesystem ops here"]
+```
+
+*The orchestrator never enters a namespace; it drives a reactive helper that is
+already inside one, so every operation the helper performs takes effect there.*
+
 The channel is a local socket that preserves message boundaries, is ordered and
 bidirectional, and — crucially — can pass file descriptors across itself. FD
 passing is what lets the orchestrator hand the helper the standard input/output

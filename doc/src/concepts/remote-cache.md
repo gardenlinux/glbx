@@ -29,6 +29,16 @@ manifest blob. An OCI registry offers two primitives:
   digest. A tag is the only thing a registry keeps permanently: a blob reachable
   from no tagged manifest is garbage-collected. Tags are cheap and unlimited.
 
+This is the same idea [ORAS](https://oras.land/) popularized — storing arbitrary
+content in an OCI registry by wrapping blobs as the *layers* of an image manifest,
+so a general-purpose registry becomes a content store without any format of its
+own. glbx uses exactly that model, specialized to its simplest possible form:
+where an ORAS artifact may carry many files as many layers under one manifest,
+glbx wraps **exactly one blob per manifest** as a single layer. Every blob the
+store holds gets its own trivial one-layer manifest; there is never more than one
+layer, and the manifest carries no artifact type, annotations, or structure beyond
+what is needed to root that one blob.
+
 Because the only durable unit is *a tag over a manifest over its layers*, the
 remote wraps **every** blob in that minimal unit. There are two tag namespaces,
 one per kind of content, and they are the whole scheme:
@@ -58,6 +68,66 @@ alias from an identity to a blob. Nothing is wrapped in anything larger than a
 single-blob manifest; there is no closure object, no layer list enumerating other
 blobs, no annotation marking roles. Both store operations become "ensure a
 one-layer manifest exists and give it a tag."
+
+```mermaid
+flowchart TD
+    bt["tag blob-&lt;hash&gt;"] --> m["one-layer manifest"]
+    mt["tag map-&lt;id&gt;"] --> m
+    m --> cfg["shared empty config"]
+    m --> layer["single layer = the blob"]
+```
+
+*A blob is rooted by a tag over a trivial one-layer manifest; a map entry adds a
+second tag onto the identical manifest the value blob already roots — no new
+object.*
+
+### The manifest, concretely
+
+A one-layer manifest is an ordinary OCI image manifest
+(`application/vnd.oci.image.manifest.v1+json`). Its `config` is the shared empty
+object — the two bytes `{}`, media type `application/vnd.oci.empty.v1+json`,
+digest `sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a` —
+and its single layer is the wrapped blob, under the generic layer media type. For
+a blob with content hash `<blob-hash>` and byte length `<size>`:
+
+```json
+{
+  "schemaVersion": 2,
+  "mediaType": "application/vnd.oci.image.manifest.v1+json",
+  "config": {
+    "mediaType": "application/vnd.oci.empty.v1+json",
+    "digest": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+    "size": 2
+  },
+  "layers": [
+    {
+      "mediaType": "application/vnd.oci.image.layer.v1.tar",
+      "digest": "sha256:<blob-hash>",
+      "size": <size>
+    }
+  ]
+}
+```
+
+That is the entire object. There is no second layer, no artifact-type field, no
+annotations. A concrete registry holding one built package and its map alias looks
+like this — three tags, each resolving to a one-layer manifest, two of which are
+byte-identical:
+
+```text
+repo: ghcr.io/<owner>/<repo>/objstore
+
+tag  blob-<manifest-hash>   →  manifest M₀ (layer = the artifact's manifest blob)
+tag  map-<identity>         →  manifest M₀ (the SAME manifest — a by-identity alias)
+tag  blob-<output-hash>     →  manifest M₁ (layer = the built .deb)
+```
+
+The map alias and the `blob/<hash>` tag over the value blob resolve to the
+*identical* manifest `M₀`, because the manifest is a fixed function of the blob it
+wraps — the registry stores it once and the two tags point at the same digest. The
+output blob (`M₁`) is kept alive by its own `blob/<hash>` tag, not by being
+enumerated inside `M₀`: each blob is rooted independently, which is what §Why
+nothing published is garbage-collected relies on.
 
 The two namespaces are written conceptually as `blob/<hash>` and `map/<id>`. An
 OCI tag may not contain a slash, so on the wire the separator is a hyphen —

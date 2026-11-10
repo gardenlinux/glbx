@@ -1,7 +1,7 @@
 # Identity
 
 This document fixes how an artifact's **identity** is computed — the one value
-the architecture sketch ([ARCHITECTURE.md](./architecture.md) §2) and the
+[the architecture chapter](./architecture.md) and the
 artifact model ([artifact-model.md](./artifact-model.md)) both lean on but
 deliberately leave abstract. Those documents establish *what* identity must be:
 a deterministic, collision-resistant value over an artifact's inputs and the
@@ -112,8 +112,9 @@ nothing else:
    global seed re-namespaces every identity at once (a full cache miss), while
    changing one type's seed invalidates exactly that type and leaves the others
    untouched — so a change to, say, how the rootfs is assembled need not discard
-   every built package. The global seed also has a runtime override, for working
-   in an independent cache namespace without editing the source.
+   every built package. The global seed also has a runtime override — the
+   `GLBX_ID_SEED_OVERRIDE` environment variable — for working in an independent
+   cache namespace, or forcing a full rebuild, without editing the source.
 2. The **direct inputs**, the leaf non-artifact data the artifact is built from:
    its source-tree dirhash, the target architecture, and — depending on the kind
    of artifact — the selected binary name, the build profiles and options, and
@@ -136,6 +137,20 @@ next cannot go unnoticed. The scheme seeds contribute nothing that distinguishes
 one artifact from another, and neither do the Includes edges, exactly as the
 artifact model requires; feeding only the identity-bearing parts in is what makes
 two artifacts with identical such parts share an identity.
+
+```mermaid
+flowchart LR
+    s1["global seed"] --> F(["SHA-256 fold"])
+    s2["per-type seed"] --> F
+    d1["source dirhash"] --> F
+    d2["target arch"] --> F
+    d3["pinned external<br/>bytes (hash)"] --> F
+    dep["Depends identities<br/>(fixed order)"] --> F
+    F --> id[["identity"]]
+```
+
+*The parts enter in a fixed structure; Includes edges and the human-readable label
+feed in nothing.*
 
 Because every dependency enters as its *identity* — itself the fold of its own
 inputs and dependencies — the computation is recursive from the leaves up. An
@@ -165,10 +180,27 @@ artifact built from it, to the image at the top. The identity is therefore the
 whole dependency ledger: a cache hit is an identity already present in the store,
 and since the identity captures every input exactly, the hit is exact.
 
+## What identity bounds — and what it does not
+
+Identity fixes a build's *inputs* completely: two builds with the same identity
+were handed byte-for-byte the same source, architecture, pinned tooling, and
+dependency outputs. That is the whole basis for treating a cache hit as an exact
+equivalence.
+
+What identity cannot do is force a build's *output* to be a deterministic function
+of those inputs. A package's own build may embed a timestamp, a hostname, or other
+entropy into what it produces; identity is computed before the build runs and has
+no say over what the build then writes. So reproducibility is bounded by the
+packages themselves — and where a package is non-deterministic, glbx makes it
+*observable* rather than silent: the same identity rebuilt yields a different
+output hash, which the reproducibility check (`glbx build --check-reproducible`)
+surfaces by comparing a rebuild's output manifest against the stored one. Identity
+guarantees the inputs match; the check reports whether the outputs did too.
+
 ## See also
 
 - The artifact, its edges, and the resolve→lookup→build→reuse traversal that
   consumes these identities: [artifact-model.md](./artifact-model.md).
 - Where source trees come from and how `3.0 (quilt)` splits committed `debian/`
   from object-store tarballs: [source-lineage.md](./source-lineage.md).
-- The high-level role of content-derived identity: [ARCHITECTURE.md](./architecture.md) §2.
+- The high-level role of content-derived identity: [architecture.md](./architecture.md).
