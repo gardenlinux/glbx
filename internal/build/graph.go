@@ -203,15 +203,17 @@ func BuildGraph(cfg GraphConfig) (*GraphResult, error) {
 }
 
 // buildImages constructs one Image per images.yml entry, resolving its rootfs
-// variant by label and its local_tooling references through the ToolingSet. A
-// missing images.yml yields no images (and no error) — the config repo has no
-// image layer.
+// variant by label and its local_tooling references through the ToolingSet, then
+// attaching each image's inputs. A two-pass construction lets an image input
+// reference an image defined anywhere in images.yml. A missing images.yml yields
+// no images (and no error) — the config repo has no image layer.
 func buildImages(cfg GraphConfig, ts *ToolingSet, rootfsByLabel map[string]*Rootfs) ([]*Image, error) {
 	specs, err := buildcfg.LoadImages(cfg.ConfDir)
 	if err != nil {
 		return nil, fmt.Errorf("load images.yml: %w", err)
 	}
 	var images []*Image
+	byName := make(map[string]*Image, len(specs))
 	for _, spec := range specs {
 		rootfs, ok := rootfsByLabel[spec.Rootfs]
 		if !ok {
@@ -231,7 +233,7 @@ func buildImages(cfg GraphConfig, ts *ToolingSet, rootfsByLabel map[string]*Root
 			}
 			local = append(local, localToolingRef{build: build, output: output})
 		}
-		images = append(images, newImage(ImageConfig{
+		im := newImage(ImageConfig{
 			Name:     spec.Name,
 			Arch:     cfg.Arch,
 			TypeDir:  typeDir,
@@ -241,7 +243,26 @@ func buildImages(cfg GraphConfig, ts *ToolingSet, rootfsByLabel map[string]*Root
 			BaseDir:  cfg.ConfDir,
 			Store:    cfg.Store,
 			StubPath: cfg.StubPath,
-		}))
+		})
+		images = append(images, im)
+		byName[spec.Name] = im
+	}
+
+	for i, spec := range specs {
+		var inputs []imageInput
+		for _, in := range spec.Inputs {
+			switch {
+			case in.Value != nil:
+				inputs = append(inputs, imageInput{label: in.Label, value: in.Value})
+			case in.Image != "":
+				dep, ok := byName[in.Image]
+				if !ok {
+					return nil, fmt.Errorf("images.yml: image %q input %q references unknown image %q", spec.Name, in.Label, in.Image)
+				}
+				inputs = append(inputs, imageInput{label: in.Label, imageDep: dep})
+			}
+		}
+		images[i].setInputs(inputs)
 	}
 	return images, nil
 }

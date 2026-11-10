@@ -71,19 +71,25 @@ store meet.
 - **Image** (`Image`): the disk-image artifact and the top of the graph, keyed
   `image:<name>:<arch>`, one per `images.yml` entry. Its identity folds the image
   seed, the name and architecture, the rootfs node's identity, the assembly
-  script bytes, the `conf.yml` bytes, every pinned assembly-tooling file hash, and
-  each local-tooling build's identity — so a change to the rootfs, the script, the
-  tool set, or a local tool rebuilds it. Its Depends are the one `Rootfs` node and
-  each local-tooling `ToolingPkgBuild` (the only cross-universe edges). Its build
+  script bytes, the `conf.yml` bytes, every pinned assembly-tooling file hash,
+  each local-tooling build's identity, and each input (a `value`'s bytes, an
+  `image` input's referenced identity) — so a change to the rootfs, the script,
+  the tool set, a local tool, or an input rebuilds it. Its Depends are the one
+  `Rootfs` node, each local-tooling `ToolingPkgBuild`, and each `Image` named by
+  an `image` input (the only cross-universe edges). Its build
   action raw-extracts the pinned assembly tooling into a container root (local
   tooling overriding same-named mirror packages), then `dpkg --unpack` +
   `--configure --pending` registers and configures them so maintainer scripts run
   and alternatives resolve — the container is a real working system, not a bag of
   files. It stages the rootfs
-  tarball read-only and the assembly script, runs the script by its shebang with
-  `CAP_SYS_ADMIN` and no loop device (`$1` the rootfs, `$2` the output path, and
+  tarball read-only and the assembly script, stages each input under `inputs/`
+  (a `value` as a regular file, an `image` input as a read-only bind mount of the
+  referenced image's output blob, resolved by source since every image shares the
+  one output name), runs the script by its shebang with
+  `CAP_SYS_ADMIN` and no loop device (`$1` the rootfs, `$2` the output path,
   `GLBX_IMAGE_ID` in the environment carrying the image identity for deriving
-  deterministic on-disk identifiers), and
+  deterministic on-disk identifiers, and `GLBX_INPUTS_DIR` pointing at the staged
+  inputs), and
   harvests the written image from the staging mount namespace into the store
   under the single output name `image`.
 

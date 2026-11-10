@@ -227,6 +227,32 @@ and content-addresses them, exactly as it does the rootfs tarball. A single
 image type is reusable across rootfs variants, and the top-level image spec is
 where each concrete rootfs×type pairing is named.
 
+### Per-image inputs
+
+The rootfs tarball and output path are the whole contract an image type depends
+on, but a *concrete* image often needs more: a kernel command line, a
+build-time flag, or — the case that motivates this — the finished artifact of
+*another* image, embedded into this one. The top-level image spec carries an
+optional `inputs` list for exactly this, so a reusable type is parameterized per
+image instance without widening the script's positional contract.
+
+Each input has a `label` and **exactly one** of:
+
+- a `value` — a literal string, written verbatim as a regular file; or
+- an `image` — the name of another image in the spec, whose single output is
+  made available as a file.
+
+Every input is staged under one directory inside the assembly container, whose
+path the script reads from `GLBX_INPUTS_DIR`; each input appears there as a file
+named by its `label`. A `value` input is a plain file holding the string. An
+`image` input is the referenced image's output blob, bind-mounted **read-only** —
+and naming it makes that image a **dependency**: it is built first, and its
+content identity folds into this image's identity, so a change to the embedded
+image rebuilds the one that embeds it. This is the one place images relate to
+each other, and it is an ordinary graph edge like every other
+([artifact-model.md](./artifact-model.md)): an image that consumes another's
+output simply Depends on it.
+
 ### The assembly tooling universe
 
 The tools that *assemble* an image are a world of their own, distinct from both

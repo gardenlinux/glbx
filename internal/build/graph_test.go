@@ -119,6 +119,77 @@ func TestBuildGraphWiresImages(t *testing.T) {
 	}
 }
 
+// An image input adds an image → image Depends edge, and referencing an unknown
+// image is rejected at graph-build time.
+func TestBuildGraphImageInputs(t *testing.T) {
+	store := newStore(t)
+	confDir := t.TempDir()
+
+	pkgsDir := filepath.Join(confDir, "pkgs")
+	writeMinimalPkg(t, pkgsDir, "glbxtest", "Source: glbxtest\nPackage: glbxtest\nArchitecture: all\n")
+	if err := os.WriteFile(filepath.Join(confDir, "rootfs-base.yml"), []byte("packages:\n  - glbxtest:glbxtest\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	writeType := func(name string) {
+		typeDir := filepath.Join(confDir, "images.d", name)
+		if err := os.MkdirAll(typeDir, 0755); err != nil {
+			t.Fatal(err)
+		}
+		os.WriteFile(filepath.Join(typeDir, "conf.yml"), []byte("debian_tooling: [e2fsprogs]\n"), 0644)
+		os.WriteFile(filepath.Join(typeDir, "build"), []byte("#!/bin/sh\n"), 0755)
+		os.WriteFile(filepath.Join(typeDir, "tooling-deps.yml"), []byte("tools: []\n"), 0644)
+	}
+	writeType("cpio")
+	writeType("gpt")
+
+	// disk consumes initrd's output as an image input, plus a literal value.
+	os.WriteFile(filepath.Join(confDir, "images.yml"), []byte(`images:
+  - name: initrd
+    rootfs: base
+    type: cpio
+  - name: disk
+    rootfs: base
+    type: gpt
+    inputs:
+      - label: initramfs
+        image: initrd
+      - label: cmdline
+        value: "console=ttyS0"
+`), 0644)
+
+	gr, err := BuildGraph(GraphConfig{ConfDir: confDir, Arch: "amd64", Store: store})
+	if err != nil {
+		t.Fatalf("BuildGraph: %v", err)
+	}
+	disk := gr.Graph.Find("image:disk:amd64")
+	if disk == nil {
+		t.Fatal("disk image node missing from graph")
+	}
+	var hasInitrd bool
+	for _, d := range disk.Depends() {
+		if d.Key() == "image:initrd:amd64" {
+			hasInitrd = true
+		}
+	}
+	if !hasInitrd {
+		t.Fatalf("disk should Depend on image:initrd:amd64, deps = %v", disk.Depends())
+	}
+
+	// Referencing an image that does not exist is a build-time error.
+	os.WriteFile(filepath.Join(confDir, "images.yml"), []byte(`images:
+  - name: disk
+    rootfs: base
+    type: gpt
+    inputs:
+      - label: initramfs
+        image: nonesuch
+`), 0644)
+	if _, err := BuildGraph(GraphConfig{ConfDir: confDir, Arch: "amd64", Store: store}); err == nil {
+		t.Fatal("an image input referencing an unknown image should be rejected")
+	}
+}
+
 // Without images.yml the graph is unchanged from the image-free shape: no image
 // nodes, roots are the rootfs variants.
 func TestBuildGraphNoImagesBackwardCompat(t *testing.T) {
