@@ -293,12 +293,26 @@ func LoadImageTypeConf(typeDir string) (ImageTypeConf, error) {
 	return out, nil
 }
 
+// ImageInput is one entry of an image's inputs list: a named piece of material
+// staged into the assembly container at inputs/<Label>. Exactly one of Value or
+// Image is set. A Value is a literal string written as a regular file; an Image
+// names another image whose output is bind-mounted read-only and which becomes a
+// build dependency. Value is a pointer so that an explicit empty string
+// (value: "") is distinguishable from an unset field.
+type ImageInput struct {
+	Label string  `yaml:"label"`
+	Value *string `yaml:"value"`
+	Image string  `yaml:"image"`
+}
+
 // ImageSpec is one entry of the top-level images.yml: a concrete image pairing
-// a rootfs variant with an image type under a developer-chosen artifact label.
+// a rootfs variant with an image type under a developer-chosen artifact label,
+// plus any inputs its assembly script consumes.
 type ImageSpec struct {
-	Name   string `yaml:"name"`   // artifact label, surfaced as image:<name>:<arch>
-	Rootfs string `yaml:"rootfs"` // a rootfs-<label>.yml label
-	Type   string `yaml:"type"`   // an images.d/<type>/ directory
+	Name   string       `yaml:"name"`   // artifact label, surfaced as image:<name>:<arch>
+	Rootfs string       `yaml:"rootfs"` // a rootfs-<label>.yml label
+	Type   string       `yaml:"type"`   // an images.d/<type>/ directory
+	Inputs []ImageInput `yaml:"inputs"`
 }
 
 type imagesYML struct {
@@ -323,6 +337,21 @@ func LoadImages(confDir string) ([]ImageSpec, error) {
 	for _, img := range raw.Images {
 		if img.Name == "" || img.Rootfs == "" || img.Type == "" {
 			return nil, fmt.Errorf("buildcfg: images.yml entry must set name, rootfs, and type (got %+v)", img)
+		}
+		seen := make(map[string]bool, len(img.Inputs))
+		for _, in := range img.Inputs {
+			if in.Label == "" {
+				return nil, fmt.Errorf("buildcfg: images.yml image %q has an input with no label", img.Name)
+			}
+			hasValue := in.Value != nil
+			hasImage := in.Image != ""
+			if hasValue == hasImage {
+				return nil, fmt.Errorf("buildcfg: images.yml image %q input %q must set exactly one of value or image", img.Name, in.Label)
+			}
+			if seen[in.Label] {
+				return nil, fmt.Errorf("buildcfg: images.yml image %q has duplicate input label %q", img.Name, in.Label)
+			}
+			seen[in.Label] = true
 		}
 	}
 	return raw.Images, nil

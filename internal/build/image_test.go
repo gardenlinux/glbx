@@ -118,6 +118,71 @@ func TestImageIdentitySensitivity(t *testing.T) {
 	}
 }
 
+func strptr(s string) *string { return &s }
+
+// Inputs fold into the image identity: a value input's bytes and an image
+// input's referenced identity both change the consuming image's identity, and a
+// stable set reproduces the same identity.
+func TestImageIdentityInputs(t *testing.T) {
+	store := newStore(t)
+	confDir := t.TempDir()
+	rootfs := newRootfsDirect("base", "amd64", nil, store)
+	typeDir := writeImageType(t, confDir, "plain-ext4", "#!/bin/sh\n", "debian_tooling: [e2fsprogs]\n", hashA)
+
+	// A separate image used as an image input.
+	depType := writeImageType(t, confDir, "cpio", "#!/bin/sh\n", "debian_tooling: [e2fsprogs]\n", hashA)
+	dep := newImage(ImageConfig{Name: "initrd", Arch: "amd64", TypeDir: depType, Rootfs: rootfs,
+		Conf: mustConf(t, depType), BaseDir: confDir, Store: store})
+
+	withInputs := func(inputs []imageInput) *Image {
+		im := newTestImage(t, confDir, typeDir, rootfs)
+		im.setInputs(inputs)
+		return im
+	}
+
+	base, err := withInputs(nil).Identity()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	valID, _ := withInputs([]imageInput{{label: "cmdline", value: strptr("quiet")}}).Identity()
+	if valID.Equal(base) {
+		t.Error("a value input must change the identity")
+	}
+	// Same value reproduces the same identity.
+	valID2, _ := withInputs([]imageInput{{label: "cmdline", value: strptr("quiet")}}).Identity()
+	if !valID2.Equal(valID) {
+		t.Error("identical value inputs must reproduce the identity")
+	}
+	// A different value changes it.
+	valID3, _ := withInputs([]imageInput{{label: "cmdline", value: strptr("verbose")}}).Identity()
+	if valID3.Equal(valID) {
+		t.Error("a changed value must change the identity")
+	}
+
+	imgID, _ := withInputs([]imageInput{{label: "initramfs", imageDep: dep}}).Identity()
+	if imgID.Equal(base) {
+		t.Error("an image input must change the identity")
+	}
+	// Changing the referenced image (its script) changes the consumer's identity.
+	writeImageType(t, confDir, "cpio", "#!/bin/sh\necho changed\n", "debian_tooling: [e2fsprogs]\n", hashA)
+	dep2 := newImage(ImageConfig{Name: "initrd", Arch: "amd64", TypeDir: depType, Rootfs: rootfs,
+		Conf: mustConf(t, depType), BaseDir: confDir, Store: store})
+	imgID2, _ := withInputs([]imageInput{{label: "initramfs", imageDep: dep2}}).Identity()
+	if imgID2.Equal(imgID) {
+		t.Error("a changed referenced image must change the consumer identity")
+	}
+}
+
+func mustConf(t *testing.T, typeDir string) buildcfg.ImageTypeConf {
+	t.Helper()
+	conf, err := buildcfg.LoadImageTypeConf(typeDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return conf
+}
+
 // A tooling build and a shipped source build over a byte-identical tree never
 // collide on key or identity — the tooling seed and key namespace keep them
 // apart, which is the structural-separation guarantee.

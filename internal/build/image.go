@@ -33,6 +33,16 @@ type localToolingRef struct {
 	output string
 }
 
+// imageInput is one resolved images.yml input, staged into the assembly
+// container at inputs/<label>. Exactly one of value or imageDep is non-nil: a
+// value is written there as a regular file; an image's output blob is
+// bind-mounted there read-only, and that image is a build dependency.
+type imageInput struct {
+	label    string
+	value    *string
+	imageDep *Image
+}
+
 // Image is the disk-image artifact and the new top of the graph. It runs an
 // image type's assembly script inside a container populated from the type's
 // tooling lock (plus any local-tooling overlays), handing the script the rootfs
@@ -44,6 +54,7 @@ type Image struct {
 	rootfs   *Rootfs
 	conf     buildcfg.ImageTypeConf
 	local    []localToolingRef
+	inputs   []imageInput
 	baseDir  string
 	store    *objstore.Store
 	stubPath string
@@ -81,14 +92,25 @@ func (im *Image) Key() string {
 	return fmt.Sprintf("image:%s:%s", im.Name, im.Arch)
 }
 
+// setInputs attaches the resolved images.yml inputs. It is called after every
+// Image is constructed, so an image input can reference an image defined later
+// in images.yml.
+func (im *Image) setInputs(inputs []imageInput) { im.inputs = inputs }
+
 func (im *Image) ShortName() string { return im.Name }
 
-// Depends are the one rootfs node and each local_tooling build. These are the
-// only cross-universe edges: image → rootfs and image → tooling build.
+// Depends are the one rootfs node, each local_tooling build, and each image
+// named by an image input. These are the only cross-universe edges: image →
+// rootfs, image → tooling build, and image → image.
 func (im *Image) Depends() []artifact.Artifact {
 	deps := []artifact.Artifact{im.rootfs}
 	for _, l := range im.local {
 		deps = append(deps, l.build)
+	}
+	for _, in := range im.inputs {
+		if in.imageDep != nil {
+			deps = append(deps, in.imageDep)
+		}
 	}
 	return deps
 }
@@ -99,12 +121,27 @@ func (im *Image) OutputRefs(store *objstore.Store) (objstore.Hash, []objstore.Ha
 	return artifact.ResolveOutputRefs(im, store)
 }
 
-// Inputs references the rootfs tarball and each local_tooling build's named
-// .deb, all resolved from their manifests before Build runs.
+// Inputs references the rootfs tarball, each local_tooling build's named .deb,
+// and the single output of each distinct image named by an image input, all
+// resolved from their manifests before Build runs. Image inputs are resolved by
+// source in Build (not through the Name-keyed input map) because every image
+// shares the same output name, so distinct images would collide on it here.
 func (im *Image) Inputs() []artifact.Input {
 	inputs := []artifact.Input{{Source: im.rootfs, Name: "rootfs.tar.gz"}}
 	for _, l := range im.local {
 		inputs = append(inputs, artifact.Input{Source: l.build, Name: l.output})
+	}
+	seen := make(map[string]bool)
+	for _, in := range im.inputs {
+		if in.imageDep == nil {
+			continue
+		}
+		key := in.imageDep.Key()
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		inputs = append(inputs, artifact.Input{Source: in.imageDep, Name: imageOutputName})
 	}
 	return inputs
 }
@@ -167,6 +204,25 @@ func (im *Image) Identity() (objstore.Hash, error) {
 			return objstore.Hash{}, fmt.Errorf("local tooling identity: %w", err)
 		}
 		parts = append(parts, id.String())
+	}
+
+	// Each input folds its label and, for a value, the literal bytes; for an
+	// image, the referenced image's identity. The image is already a Depends, but
+	// a Depends edge does not by itself fold the dependency's identity into this
+	// node — folding it here is what makes a changed referenced image rebuild
+	// this one.
+	for _, in := range im.inputs {
+		parts = append(parts, "input", in.label)
+		switch {
+		case in.value != nil:
+			parts = append(parts, "value", *in.value)
+		case in.imageDep != nil:
+			id, err := in.imageDep.Identity()
+			if err != nil {
+				return objstore.Hash{}, fmt.Errorf("input %q image identity: %w", in.label, err)
+			}
+			parts = append(parts, "image", id.String())
+		}
 	}
 
 	hash := objstore.ConcatHash(parts...)
@@ -309,6 +365,12 @@ func (im *Image) Build(ctx artifact.BuildContext) ([]artifact.Output, error) {
 	}
 	f.Close()
 
+	// Stage each input under stageDir/inputs: a value as a regular file, an image
+	// input as a read-only bind mount of the referenced image's output blob.
+	if err := im.stageInputs(mountNS, store, stageDir); err != nil {
+		return nil, err
+	}
+
 	cont, err := container.NewContainer(container.ContainerConfig{
 		Ctx:      ctx.Ctx,
 		Parent:   mountNS,
@@ -341,6 +403,7 @@ func (im *Image) Build(ctx artifact.BuildContext) ([]artifact.Output, error) {
 	const inScript = "/glbx-image/build"
 	const inRootfs = "/glbx-image/rootfs.tar.gz"
 	const inOutput = "/glbx-image/image.out"
+	const inInputs = "/glbx-image/inputs"
 
 	// The image's identity is exposed to the script so it can derive every
 	// otherwise-random on-disk identifier (filesystem/partition/disk UUIDs, hash
@@ -359,6 +422,7 @@ func (im *Image) Build(ctx artifact.BuildContext) ([]artifact.Output, error) {
 		"LANG=C.UTF-8",
 		"PATH=/usr/sbin:/usr/bin:/sbin:/bin",
 		"GLBX_IMAGE_ID=" + identity.String(),
+		"GLBX_INPUTS_DIR=" + inInputs,
 	}, nil, "/", inScript, inRootfs, inOutput); err != nil {
 		cont.Close()
 		return nil, fmt.Errorf("assembly script: %w", err)
@@ -421,6 +485,67 @@ func (im *Image) localToolingPkgs(inputs map[string]objstore.Hash, store *objsto
 		}
 	}
 	return pkgs, nil
+}
+
+// stageInputs populates stageDir/inputs from im.inputs, under the staging mount
+// namespace. A value input is written as a regular file; an image input is a
+// read-only bind mount of the referenced image's single output blob, resolved
+// by source (not through the Name-keyed input map, which cannot distinguish
+// distinct images that share the one output name).
+func (im *Image) stageInputs(mountNS *container.MountNS, store *objstore.Store, stageDir string) error {
+	if len(im.inputs) == 0 {
+		return nil
+	}
+	inputsDir := stageDir + "/inputs"
+	if err := mountNS.Mkdir(inputsDir, 0755); err != nil {
+		return fmt.Errorf("mkdir inputs dir: %w", err)
+	}
+	for _, in := range im.inputs {
+		dst := inputsDir + "/" + in.label
+		switch {
+		case in.value != nil:
+			f, err := mountNS.Open(dst, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)
+			if err != nil {
+				return fmt.Errorf("open input %q for write: %w", in.label, err)
+			}
+			if _, err := f.Write([]byte(*in.value)); err != nil {
+				f.Close()
+				return fmt.Errorf("write input %q: %w", in.label, err)
+			}
+			f.Close()
+		case in.imageDep != nil:
+			hash, err := imageOutputBlob(in.imageDep, store)
+			if err != nil {
+				return fmt.Errorf("input %q: %w", in.label, err)
+			}
+			blobPath, err := store.Blobs.Path(hash)
+			if err != nil {
+				return fmt.Errorf("input %q image blob: %w", in.label, err)
+			}
+			if err := mountNS.CreateFile(dst, 0644); err != nil {
+				return fmt.Errorf("create input %q mount point: %w", in.label, err)
+			}
+			if err := mountNS.Mount(blobPath, dst, "", mountBindRO, ""); err != nil {
+				return fmt.Errorf("bind input %q: %w", in.label, err)
+			}
+		}
+	}
+	return nil
+}
+
+// imageOutputBlob resolves another image's single output blob hash from its
+// committed manifest, selecting the entry named imageOutputName.
+func imageOutputBlob(im *Image, store *objstore.Store) (objstore.Hash, error) {
+	outputs, err := artifact.ResolveOutputs(im, store)
+	if err != nil {
+		return objstore.Hash{}, err
+	}
+	for _, o := range outputs {
+		if o.Name == imageOutputName {
+			return o.Hash, nil
+		}
+	}
+	return objstore.Hash{}, fmt.Errorf("%s has no %q output", im.Key(), imageOutputName)
 }
 
 // hashFile returns the hex SHA-256 of a file's content.

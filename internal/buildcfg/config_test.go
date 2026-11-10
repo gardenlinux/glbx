@@ -363,6 +363,68 @@ func TestLoadImages_IncompleteEntryErrors(t *testing.T) {
 	}
 }
 
+func TestLoadImages_Inputs(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "images.yml"), `images:
+  - name: initrd
+    rootfs: base
+    type: cpio
+  - name: disk
+    rootfs: base
+    type: gpt
+    inputs:
+      - label: initramfs
+        image: initrd
+      - label: cmdline
+        value: "console=ttyS0"
+      - label: empty
+        value: ""
+`)
+	imgs, err := LoadImages(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	disk := imgs[1]
+	if len(disk.Inputs) != 3 {
+		t.Fatalf("disk inputs = %+v", disk.Inputs)
+	}
+	if disk.Inputs[0].Image != "initrd" || disk.Inputs[0].Value != nil {
+		t.Errorf("image input = %+v", disk.Inputs[0])
+	}
+	if disk.Inputs[1].Value == nil || *disk.Inputs[1].Value != "console=ttyS0" {
+		t.Errorf("value input = %+v", disk.Inputs[1])
+	}
+	if disk.Inputs[2].Value == nil || *disk.Inputs[2].Value != "" {
+		t.Errorf("empty value input should be present, got %+v", disk.Inputs[2])
+	}
+}
+
+func TestLoadImages_InputValidation(t *testing.T) {
+	cases := map[string]string{
+		"no label": `images:
+  - {name: a, rootfs: base, type: t, inputs: [{value: v}]}
+`,
+		"both value and image": `images:
+  - {name: a, rootfs: base, type: t, inputs: [{label: l, value: v, image: b}]}
+`,
+		"neither value nor image": `images:
+  - {name: a, rootfs: base, type: t, inputs: [{label: l}]}
+`,
+		"duplicate label": `images:
+  - {name: a, rootfs: base, type: t, inputs: [{label: l, value: x}, {label: l, value: y}]}
+`,
+	}
+	for name, yml := range cases {
+		t.Run(name, func(t *testing.T) {
+			dir := t.TempDir()
+			writeFile(t, filepath.Join(dir, "images.yml"), yml)
+			if _, err := LoadImages(dir); err == nil {
+				t.Fatalf("%s should be rejected", name)
+			}
+		})
+	}
+}
+
 func TestDiscoverImageTypes(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, filepath.Join(dir, "images.d", "plain-ext4", "conf.yml"), "debian_tooling: [e2fsprogs]\n")
