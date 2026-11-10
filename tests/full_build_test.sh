@@ -116,9 +116,11 @@ phase_verify() {
 	# Pull the harvested image blob out of the cache and confirm it is a valid
 	# ext4 holding the rootfs — proving the type script ran in-container and the
 	# output was harvested from the staging namespace. Checked from outside any
-	# container with host tooling only.
+	# container with host tooling only. The build targets the host arch by
+	# default, so resolve the output path for that arch rather than hard-coding one.
+	ARCH=$(dpkg --print-architecture 2>/dev/null || echo amd64)
 	IMG_PATH=$("$GLBX" build --cache "$CACHE_DIR" --conf-dir "$STAGING_DIR" --stub "$STUB" \
-		--output-path image:base-ext4:amd64 image 2>/dev/null) || {
+		--output-path "image:base-ext4:$ARCH" image 2>/dev/null) || {
 		echo "FAIL: could not resolve base-ext4 image output path"; exit 1;
 	}
 	[ -f "$IMG_PATH" ] || { echo "FAIL: image blob $IMG_PATH missing"; exit 1; }

@@ -89,14 +89,25 @@ func (b *debianBinaryPkg) resolveExtraDeps() {
 		}
 	}
 
-	for _, depSpec := range buildYML.RuntimeDepends[b.name] {
-		if src, bin, ok := strings.Cut(depSpec, ":"); ok {
-			addDep(src, bin)
+	// runtime_depends is keyed by produced binary name, and both keys and values
+	// may carry the %ARCH% placeholder (the kernel's arch-flavoured binaries).
+	// b.name is already arch-concrete (it came from the resolved package set), so
+	// substitute the placeholder in the config keys to match it, and in the dep
+	// values before resolving them.
+	arch := b.sourceBuild.Arch
+	for key, deps := range buildYML.RuntimeDepends {
+		if buildcfg.SubstArch(key, arch) != b.name {
+			continue
+		}
+		for _, depSpec := range deps {
+			if src, bin, ok := strings.Cut(buildcfg.SubstArch(depSpec, arch), ":"); ok {
+				addDep(src, bin)
+			}
 		}
 	}
 	// build_depends are locally built too, so they count toward locality.
 	for _, depSpec := range buildYML.BuildDepends {
-		if src, bin, ok := strings.Cut(depSpec, ":"); ok {
+		if src, bin, ok := strings.Cut(buildcfg.SubstArch(depSpec, arch), ":"); ok {
 			addDep(src, bin)
 		}
 	}
@@ -296,11 +307,17 @@ func (b *debianBinaryPkg) lockfileDepNames() []string {
 	if err != nil {
 		return nil
 	}
-	ldeps, ok := buildYML.LockfileDeps[b.name]
-	if !ok {
-		return nil
+	// Keys may carry %ARCH%; b.name is arch-concrete. Match after substitution.
+	arch := b.sourceBuild.Arch
+	for key, ldeps := range buildYML.LockfileDeps {
+		if buildcfg.SubstArch(key, arch) != b.name {
+			continue
+		}
+		out := make([]string, len(ldeps))
+		for i, d := range ldeps {
+			out[i] = buildcfg.SubstArch(d, arch)
+		}
+		return out
 	}
-	out := make([]string, len(ldeps))
-	copy(out, ldeps)
-	return out
+	return nil
 }
