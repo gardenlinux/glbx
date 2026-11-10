@@ -13,7 +13,7 @@ import (
 func gitInit(t *testing.T) string {
 	t.Helper()
 	root := t.TempDir()
-	runGit(t, root, "init", "-q")
+	runGit(t, root, "init", "-q", "-b", "main")
 	runGit(t, root, "config", "user.email", "test@example.invalid")
 	runGit(t, root, "config", "user.name", "test")
 	if err := os.WriteFile(filepath.Join(root, "README"), []byte("base\n"), 0o644); err != nil {
@@ -363,7 +363,7 @@ func TestCollectPkgMetadata(t *testing.T) {
 
 func TestCollectPkgMetadataUnborn(t *testing.T) {
 	root := t.TempDir()
-	runGit(t, root, "init", "-q")
+	runGit(t, root, "init", "-q", "-b", "main")
 
 	entries, err := CollectPkgMetadata(root)
 	if err != nil {
