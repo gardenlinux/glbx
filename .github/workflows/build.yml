@@ -1,0 +1,60 @@
+name: build
+
+on: [push, pull_request]
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - name: Check out glbx
+        uses: actions/checkout@v7
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version: stable
+
+      - name: Install build and test dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y protobuf-compiler uidmap
+          go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
+
+      - name: Install mdBook
+        run: cargo install mdbook mdbook-mermaid
+
+      # The sandbox needs unprivileged user namespaces; Ubuntu runners restrict
+      # them via AppArmor, which otherwise EPERMs the e2e build.
+      - name: Allow unprivileged user namespaces
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+
+      # Step 1: build.
+      - name: Build
+        run: make build
+
+      # Step 2: unit tests, then the end-to-end acceptance build.
+      - name: Test
+        run: make test && make e2e
+
+      # Step 3: build the documentation book and publish it to GitHub Pages.
+      - name: Build the documentation book
+        run: make doc
+
+      - name: Upload the book as a Pages artifact
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        uses: actions/upload-pages-artifact@v5
+        with:
+          path: ./doc/book
+
+      - name: Deploy to GitHub Pages
+        id: deploy
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        uses: actions/deploy-pages@v5
