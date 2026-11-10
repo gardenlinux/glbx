@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
 	"sync"
 	"sync/atomic"
 
@@ -128,8 +129,51 @@ func resolveAndFetch(ctx context.Context, store *objstore.Store, l *log.Logger,
 // YAML: one tool per package, each with its exact version and a single file
 // recording the architecture, content hash, and retrieval URLs of its .deb. The
 // mirror URL is recorded first and the hash-addressed snapshot URL second.
+//
+// A lockfile can pin more than one target architecture: each tool's files list
+// carries one entry per architecture (plus arch-independent "all" packages). To
+// support that, writeBuildDeps MERGES into any lockfile already at path rather
+// than overwriting it. Every architecture the new resolution covers is replaced
+// wholesale (so re-locking an arch is idempotent and drops packages it no longer
+// needs), while entries for architectures the new resolution does not cover are
+// preserved untouched. This lets `glbx lockfile --arch arm64` add arm64 pins to
+// a committed amd64 lockfile without clobbering the amd64 ones.
 func writeBuildDeps(path, repoURL, snapshotBase string, packages []*index.Package) error {
-	doc := toolsDoc{Tools: make([]toolEntry, 0, len(packages))}
+	// Architectures this resolution covers; their old entries are replaced.
+	coveredArch := make(map[string]bool)
+	for _, pkg := range packages {
+		coveredArch[pkg.Architecture] = true
+	}
+
+	// Start from the existing lockfile (if any), dropping every file entry whose
+	// arch this resolution covers. What remains are the other architectures'
+	// pins, which must be preserved verbatim.
+	byName := make(map[string]*toolEntry)
+	var order []string
+	if existing, err := os.ReadFile(path); err == nil {
+		var old toolsDoc
+		if err := yaml.Unmarshal(existing, &old); err != nil {
+			return fmt.Errorf("parse existing lockfile %s for merge: %w", path, err)
+		}
+		for i := range old.Tools {
+			t := old.Tools[i]
+			var keep []fileEntry
+			for _, f := range t.Files {
+				if !coveredArch[f.Arch] {
+					keep = append(keep, f)
+				}
+			}
+			if len(keep) == 0 {
+				continue
+			}
+			kept := t
+			kept.Files = keep
+			byName[t.Name] = &kept
+			order = append(order, t.Name)
+		}
+	}
+
+	// Fold in the freshly resolved packages for the covered architectures.
 	for _, pkg := range packages {
 		if pkg.SHA256 == "" || pkg.Filename == "" {
 			return fmt.Errorf("package %s: missing hash or filename", pkg.Name)
@@ -137,18 +181,37 @@ func writeBuildDeps(path, repoURL, snapshotBase string, packages []*index.Packag
 		if pkg.SHA1 == "" {
 			return fmt.Errorf("package %s: missing SHA1 (not fetched)", pkg.Name)
 		}
-		doc.Tools = append(doc.Tools, toolEntry{
-			Name:    pkg.Name,
-			Version: pkg.Version,
-			Files: []fileEntry{{
-				Arch:   pkg.Architecture,
-				SHA256: pkg.SHA256,
-				URLs: []string{
-					fmt.Sprintf("%s/%s", repoURL, pkg.Filename),
-					aptrepo.SnapshotURL(snapshotBase, pkg.SHA1, filepath.Base(pkg.Filename)),
-				},
-			}},
-		})
+		fe := fileEntry{
+			Arch:   pkg.Architecture,
+			SHA256: pkg.SHA256,
+			URLs: []string{
+				fmt.Sprintf("%s/%s", repoURL, pkg.Filename),
+				aptrepo.SnapshotURL(snapshotBase, pkg.SHA1, filepath.Base(pkg.Filename)),
+			},
+		}
+		if te, ok := byName[pkg.Name]; ok {
+			te.Files = append(te.Files, fe)
+			// Record the covered-arch version so the annotation reflects this
+			// resolution rather than a stale other-arch value.
+			te.Version = pkg.Version
+		} else {
+			byName[pkg.Name] = &toolEntry{
+				Name:    pkg.Name,
+				Version: pkg.Version,
+				Files:   []fileEntry{fe},
+			}
+			order = append(order, pkg.Name)
+		}
+	}
+
+	// Emit tools sorted by name, and each tool's files sorted by arch, so the
+	// lockfile is deterministic regardless of merge/resolution order.
+	sort.Strings(order)
+	doc := toolsDoc{Tools: make([]toolEntry, 0, len(order))}
+	for _, name := range order {
+		te := byName[name]
+		sort.Slice(te.Files, func(i, j int) bool { return te.Files[i].Arch < te.Files[j].Arch })
+		doc.Tools = append(doc.Tools, *te)
 	}
 
 	data, err := yaml.Marshal(doc)
