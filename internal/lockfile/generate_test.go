@@ -35,17 +35,24 @@ func TestWriteBuildDeps(t *testing.T) {
 	if len(tools) != 2 {
 		t.Fatalf("got %d tools, want 2", len(tools))
 	}
-	if tools[0].Name != "gcc-14" || tools[0].Version != "14.2.0-3" {
-		t.Errorf("tool[0] = %+v", tools[0])
+	// writeBuildDeps sorts tools by name for deterministic output, so look each
+	// up by name rather than by input order.
+	byName := map[string]buildcfg.PinnedTool{}
+	for _, tl := range tools {
+		byName[tl.Name] = tl
 	}
-	if len(tools[0].Files) != 1 || tools[0].Files[0].Arch != "amd64" {
-		t.Errorf("tool[0] files = %+v", tools[0].Files)
+	gcc, ok := byName["gcc-14"]
+	if !ok || gcc.Version != "14.2.0-3" {
+		t.Errorf("gcc-14 = %+v (ok=%v)", gcc, ok)
 	}
-	got := tools[0].Files[0].URLs
+	if len(gcc.Files) != 1 || gcc.Files[0].Arch != "amd64" {
+		t.Errorf("gcc-14 files = %+v", gcc.Files)
+	}
+	got := gcc.Files[0].URLs
 	wantMirror := "https://deb.debian.org/debian/pool/main/g/gcc-14/gcc-14_amd64.deb"
 	wantSnapshot := "https://snapshot.debian.org/file/1111111111111111111111111111111111111111/gcc-14_amd64.deb"
 	if len(got) != 2 || got[0] != wantMirror || got[1] != wantSnapshot {
-		t.Errorf("tool[0] urls = %v", got)
+		t.Errorf("gcc-14 urls = %v", got)
 	}
 }
 
@@ -54,6 +61,62 @@ func TestWriteBuildDepsRejectsMissingHash(t *testing.T) {
 	pkgs := []*index.Package{{Name: "x", Version: "1", Architecture: "amd64", Filename: "pool/x.deb"}}
 	if err := writeBuildDeps(path, "https://example", "", pkgs); err == nil {
 		t.Fatal("expected error for package with no SHA256")
+	}
+}
+
+// Writing a second architecture into an existing lockfile must merge: arch-
+// specific pins for the already-present arch are kept, shared "all" packages are
+// carried, and the newly-locked arch's pins are added alongside.
+func TestWriteBuildDepsMergesArches(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "build-deps.yml")
+
+	amd64 := []*index.Package{
+		{Name: "gcc", Version: "14-amd64", Architecture: "amd64", SHA256: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", SHA1: "1111111111111111111111111111111111111111", Filename: "pool/g/gcc/gcc_amd64.deb"},
+		{Name: "debhelper", Version: "13", Architecture: "all", SHA256: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", SHA1: "2222222222222222222222222222222222222222", Filename: "pool/d/debhelper/debhelper_all.deb"},
+	}
+	if err := writeBuildDeps(path, "https://deb.debian.org/debian", "", amd64); err != nil {
+		t.Fatal(err)
+	}
+
+	arm64 := []*index.Package{
+		{Name: "gcc", Version: "14-arm64", Architecture: "arm64", SHA256: "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", SHA1: "3333333333333333333333333333333333333333", Filename: "pool/g/gcc/gcc_arm64.deb"},
+		{Name: "debhelper", Version: "13", Architecture: "all", SHA256: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", SHA1: "2222222222222222222222222222222222222222", Filename: "pool/d/debhelper/debhelper_all.deb"},
+	}
+	if err := writeBuildDeps(path, "https://deb.debian.org/debian", "", arm64); err != nil {
+		t.Fatal(err)
+	}
+
+	tools, err := buildcfg.LoadBuildDeps(path)
+	if err != nil {
+		t.Fatalf("load back: %v", err)
+	}
+	byName := map[string]buildcfg.PinnedTool{}
+	for _, tl := range tools {
+		byName[tl.Name] = tl
+	}
+
+	// gcc must now carry BOTH amd64 and arm64 pins.
+	gcc := byName["gcc"]
+	arches := map[string]bool{}
+	for _, f := range gcc.Files {
+		arches[f.Arch] = true
+	}
+	if !arches["amd64"] || !arches["arm64"] {
+		t.Errorf("gcc should carry amd64+arm64 after merge, got files %+v", gcc.Files)
+	}
+
+	// FilesForArch must pick the right pin for each arch.
+	for _, arch := range []string{"amd64", "arm64"} {
+		files := buildcfg.FilesForArch([]buildcfg.PinnedTool{gcc}, arch)
+		if len(files) != 1 || files[0].Arch != arch {
+			t.Errorf("FilesForArch(%s) = %+v, want exactly the %s pin", arch, files, arch)
+		}
+	}
+
+	// The shared "all" package must not be duplicated.
+	deb := byName["debhelper"]
+	if len(deb.Files) != 1 || deb.Files[0].Arch != "all" {
+		t.Errorf("debhelper should have a single 'all' file, got %+v", deb.Files)
 	}
 }
 
