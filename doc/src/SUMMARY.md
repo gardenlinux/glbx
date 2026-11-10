@@ -20,9 +20,14 @@
 # Implementation
 
 - [Foundations](./impl/foundations.md)
+- [Logging and the progress UI](./impl/logging-ui.md)
 - [Debian format layer](./impl/debian.md)
-- [Repository access, import, and lock](./impl/repo.md)
-- [Execution environment](./impl/exec-env.md)
-- [The build engine](./impl/engine.md)
+- [The dependency resolver](./impl/resolver.md)
+- [Byte streams and repository access](./impl/streams-repo.md)
+- [Source import, lineage, and locking](./impl/repo.md)
+- [The execution environment](./impl/exec-env.md)
+- [The artifact engine](./impl/engine.md)
 - [Package build and image assembly](./impl/build.md)
+- [Out-of-container signing](./impl/signing.md)
+- [Reproducible image helpers](./impl/image-helpers.md)
 - [Command-line interface](./impl/cli.md)
