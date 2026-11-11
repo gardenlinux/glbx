@@ -120,6 +120,59 @@ func TestWriteBuildDepsMergesArches(t *testing.T) {
 	}
 }
 
+// TestWriteBuildDepsPreservesUnresolvedAllPackage guards the subtle case where an
+// arch-independent ("all") package is in one arch's build closure but NOT in
+// another's. Relocking the second arch must NOT drop that "all" package, because
+// FilesForArch feeds every "all" file into every arch's install set — dropping it
+// would silently remove it from the FIRST arch's effective set too. (Concretely:
+// fonts-croscore was an amd64-only build-tooling dep that shipped as "all"; an
+// early merge impl dropped it when relocking arm64, corrupting the amd64 lock.)
+func TestWriteBuildDepsPreservesUnresolvedAllPackage(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "build-deps.yml")
+
+	// amd64 closure includes an "all" package (fonts) that arm64 will NOT need.
+	amd64 := []*index.Package{
+		{Name: "gcc", Version: "14-amd64", Architecture: "amd64", SHA256: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", SHA1: "1111111111111111111111111111111111111111", Filename: "pool/g/gcc/gcc_amd64.deb"},
+		{Name: "fonts", Version: "1", Architecture: "all", SHA256: "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd", SHA1: "4444444444444444444444444444444444444444", Filename: "pool/f/fonts/fonts_all.deb"},
+	}
+	if err := writeBuildDeps(path, "https://deb.debian.org/debian", "", amd64); err != nil {
+		t.Fatal(err)
+	}
+
+	// arm64 resolution does NOT include "fonts" at all.
+	arm64 := []*index.Package{
+		{Name: "gcc", Version: "14-arm64", Architecture: "arm64", SHA256: "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", SHA1: "3333333333333333333333333333333333333333", Filename: "pool/g/gcc/gcc_arm64.deb"},
+	}
+	if err := writeBuildDeps(path, "https://deb.debian.org/debian", "", arm64); err != nil {
+		t.Fatal(err)
+	}
+
+	tools, err := buildcfg.LoadBuildDeps(path)
+	if err != nil {
+		t.Fatalf("load back: %v", err)
+	}
+	byName := map[string]buildcfg.PinnedTool{}
+	for _, tl := range tools {
+		byName[tl.Name] = tl
+	}
+
+	// The "all" fonts package must still be present after the arm64 relock.
+	fonts, ok := byName["fonts"]
+	if !ok {
+		t.Fatalf("fonts ('all') was dropped by arm64 relock; it must be preserved")
+	}
+	if len(fonts.Files) != 1 || fonts.Files[0].Arch != "all" {
+		t.Errorf("fonts should keep its single 'all' file, got %+v", fonts.Files)
+	}
+	// And it must flow into BOTH arches' install sets.
+	for _, arch := range []string{"amd64", "arm64"} {
+		files := buildcfg.FilesForArch([]buildcfg.PinnedTool{fonts}, arch)
+		if len(files) != 1 || files[0].Arch != "all" {
+			t.Errorf("FilesForArch(%s) for fonts = %+v, want the 'all' pin", arch, files)
+		}
+	}
+}
+
 func TestExtractBuildDeps(t *testing.T) {
 	dir := t.TempDir()
 	controlPath := filepath.Join(dir, "control")
