@@ -880,6 +880,108 @@ func TestConsumerInheritsIncludesClosure(t *testing.T) {
 	}
 }
 
+// TestConsumerInheritsIncludeDependsClosure is the regression guard for the
+// install-check ordering bug. The real shape: C.Depends(A) (libpam-runtime),
+// A.Includes(B) (sibling libpam-modules from the same source build), and
+// B.Depends(D) (cross-source glibc:libc6). C's install-check resolves the full
+// transitive closure (walkBinaries follows both Includes and Depends), so it
+// needs D present — which means C must be build-ordered after D. The old
+// consumer-side closure followed only Includes chains and stopped at B, so C
+// got no edge to D and could run before D was built (the cold-cache /
+// heavy-parallelism flake). The closure must now reach D through B's Depends.
+func TestConsumerInheritsIncludeDependsClosure(t *testing.T) {
+	check := func(t *testing.T, g *Graph) {
+		t.Helper()
+		cNode := g.nodeMap["C"]
+		if cNode == nil {
+			t.Fatal("C not in graph")
+		}
+		cDepKeys := make(map[string]bool)
+		for _, dep := range cNode.deps {
+			cDepKeys[dep.artifact.Key()] = true
+		}
+		// C must be ordered after A (direct Depends), B (A's Include), and D
+		// (B's Depends, reached through the Include). D is the hop the old code
+		// missed.
+		for _, want := range []string{"A", "B", "D"} {
+			if !cDepKeys[want] {
+				t.Fatalf("expected C.deps to include %s, got %v", want, cDepKeys)
+			}
+		}
+		// A must NOT wait on its own Include B, nor transitively on D: a node
+		// never waits on its own includes. A's only edge is to nothing here
+		// (A has no Depends), so A is a root.
+		aNode := g.nodeMap["A"]
+		for _, dep := range aNode.deps {
+			if dep.artifact.Key() == "B" || dep.artifact.Key() == "D" {
+				t.Fatalf("A must not be ordered after its own include-closure, got dep %s", dep.artifact.Key())
+			}
+		}
+	}
+
+	build := func() (*mockArtifact, *mockArtifact, *mockArtifact, *mockArtifact) {
+		a := &mockArtifact{name: "A", identity: strings.Repeat("a1", 32)}
+		b := &mockArtifact{name: "B", identity: strings.Repeat("b2", 32)}
+		c := &mockArtifact{name: "C", identity: strings.Repeat("c3", 32)}
+		d := &mockArtifact{name: "D", identity: strings.Repeat("d4", 32)}
+		a.includes = []Artifact{b}
+		b.deps = []Artifact{d}
+		c.deps = []Artifact{a}
+		return a, b, c, d
+	}
+
+	t.Run("Discover", func(t *testing.T) {
+		_, _, c, _ := build()
+		g, err := Discover([]Artifact{c})
+		if err != nil {
+			t.Fatal(err)
+		}
+		check(t, g)
+	})
+
+	t.Run("GraphBuild", func(t *testing.T) {
+		a, b, c, d := build()
+		g := NewGraph()
+		for _, art := range []Artifact{a, b, c, d} {
+			g.Add(art)
+		}
+		if err := g.Build(); err != nil {
+			t.Fatal(err)
+		}
+		check(t, g)
+	})
+
+	// Guard the narrowness of the fix: a pure Depends spine C->A->D (A Depends D,
+	// no Includes anywhere) must NOT be flattened — C gets a direct edge to A
+	// only, never a transitive C->D. The engine already orders D before A before
+	// C via pending counts, and flattening would bloat the generated CI needs:
+	// lists. This is the companion to TestDependsOnlyDirectNotTransitive, pinned
+	// to node.deps rather than the Mermaid rendering.
+	t.Run("PureDependsSpineNotFlattened", func(t *testing.T) {
+		a := &mockArtifact{name: "A", identity: strings.Repeat("a1", 32)}
+		c := &mockArtifact{name: "C", identity: strings.Repeat("c3", 32)}
+		d := &mockArtifact{name: "D", identity: strings.Repeat("d4", 32)}
+		a.deps = []Artifact{d} // pure Depends, NOT an Include
+		c.deps = []Artifact{a}
+
+		g, err := Discover([]Artifact{c})
+		if err != nil {
+			t.Fatal(err)
+		}
+		cNode := g.nodeMap["C"]
+		cDepKeys := make(map[string]bool)
+		for _, dep := range cNode.deps {
+			cDepKeys[dep.artifact.Key()] = true
+		}
+		if !cDepKeys["A"] {
+			t.Fatalf("expected C.deps to include A, got %v", cDepKeys)
+		}
+		if cDepKeys["D"] {
+			t.Fatalf("pure Depends spine must not be flattened: C.deps unexpectedly includes D, got %v", cDepKeys)
+		}
+	})
+}
+
 func TestOutputRefs(t *testing.T) {
 	dir := t.TempDir()
 	store, err := objstore.NewLocal(dir)
