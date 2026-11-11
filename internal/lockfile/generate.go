@@ -133,21 +133,35 @@ func resolveAndFetch(ctx context.Context, store *objstore.Store, l *log.Logger,
 // A lockfile can pin more than one target architecture: each tool's files list
 // carries one entry per architecture (plus arch-independent "all" packages). To
 // support that, writeBuildDeps MERGES into any lockfile already at path rather
-// than overwriting it. Every architecture the new resolution covers is replaced
-// wholesale (so re-locking an arch is idempotent and drops packages it no longer
-// needs), while entries for architectures the new resolution does not cover are
-// preserved untouched. This lets `glbx lockfile --arch arm64` add arm64 pins to
-// a committed amd64 lockfile without clobbering the amd64 ones.
+// than overwriting it. Every CONCRETE architecture the new resolution covers is
+// replaced wholesale (so re-locking an arch is idempotent and drops packages it
+// no longer needs), while entries for concrete architectures the new resolution
+// does not cover are preserved untouched. This lets `glbx lockfile --arch arm64`
+// add arm64 pins to a committed amd64 lockfile without clobbering the amd64 ones.
+//
+// Arch-independent ("all") entries are treated specially: they are NOT dropped
+// just because the current arch's resolution omitted them. An "all" package can
+// belong to one arch's build closure but not another's (e.g. an amd64-only
+// build-tooling dep that happens to ship as arch "all"), and FilesForArch feeds
+// every "all" file into EVERY arch's install set. Dropping an "all" entry during
+// a single-arch relock would therefore silently remove it from the OTHER arch's
+// effective set too — breaking that arch. So old "all" entries are preserved and
+// the fresh resolution's "all" pins are upserted over them (newest pin wins on a
+// version bump; no duplicates). Pruning an "all" package that no arch needs any
+// more requires re-locking every arch, which is the correct, explicit action.
 func writeBuildDeps(path, repoURL, snapshotBase string, packages []*index.Package) error {
-	// Architectures this resolution covers; their old entries are replaced.
+	// Concrete architectures this resolution covers; their old entries are
+	// replaced wholesale. "all" is deliberately excluded — see the doc comment.
 	coveredArch := make(map[string]bool)
 	for _, pkg := range packages {
-		coveredArch[pkg.Architecture] = true
+		if pkg.Architecture != "all" {
+			coveredArch[pkg.Architecture] = true
+		}
 	}
 
 	// Start from the existing lockfile (if any), dropping every file entry whose
-	// arch this resolution covers. What remains are the other architectures'
-	// pins, which must be preserved verbatim.
+	// concrete arch this resolution covers. What remains are the other concrete
+	// architectures' pins plus every "all" pin — all of which must be preserved.
 	byName := make(map[string]*toolEntry)
 	var order []string
 	if existing, err := os.ReadFile(path); err == nil {
@@ -190,7 +204,22 @@ func writeBuildDeps(path, repoURL, snapshotBase string, packages []*index.Packag
 			},
 		}
 		if te, ok := byName[pkg.Name]; ok {
-			te.Files = append(te.Files, fe)
+			// Upsert by arch: a preserved "all" entry (never dropped above) must
+			// be replaced in place rather than duplicated when this resolution
+			// also pins the same "all" package. Concrete-arch entries for covered
+			// arches were already dropped, so this only matters for "all", but
+			// upserting by arch is correct and harmless in every case.
+			replaced := false
+			for i := range te.Files {
+				if te.Files[i].Arch == fe.Arch {
+					te.Files[i] = fe
+					replaced = true
+					break
+				}
+			}
+			if !replaced {
+				te.Files = append(te.Files, fe)
+			}
 			// Record the covered-arch version so the annotation reflects this
 			// resolution rather than a stale other-arch value.
 			te.Version = pkg.Version
