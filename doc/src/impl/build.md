@@ -445,7 +445,10 @@ what makes a changed referenced image rebuild this one.
      otherwise-random on-disk identifier (filesystem/partition/disk UUIDs, hash
      seeds) deterministically from a value that is already a pure function of the
      rootfs + script + tooling;
-   - `GLBX_INPUTS_DIR` = `/glbx-image/inputs`.
+   - `GLBX_INPUTS_DIR` = `/glbx-image/inputs`;
+   - `GLBX_ARCH` = the target architecture, for arch-dependent on-disk metadata
+     (e.g. the per-architecture GPT root partition type GUID). Additive: a script
+     that does not need it ignores it.
 5. Harvest the written image from the staging mount namespace (never `cat` out of
    the container): the file is visible in the parent namespace under the tmpfs,
    and `harvestFileFromMountNS` streams it into the store as the single `image`

@@ -97,10 +97,14 @@ build_deps:
 ```
 
 `arch` is either a concrete Debian architecture (`amd64`, `arm64`, …) or `all`
-for an architecture-independent `.deb`. Each tool entry carries **either** a set
-of per-architecture files (one per supported concrete architecture) **or** a
-single `all` file — never a mix. A tool is thus available for every architecture
-the system targets, or it is an arch-independent file that serves all of them.
+for an architecture-independent `.deb`. A tool entry carries one file per concrete
+architecture the lockfile has been generated for, **or** a single `all` file when
+the `.deb` is architecture-independent — never a mix. So a lockfile can pin more
+than one target architecture at once: each tool simply lists an `amd64` file and
+an `arm64` file side by side (as `gcc-14` does above), while an `all` tool like
+`debhelper` carries the one file that serves every architecture. How a file for a
+second architecture comes to sit beside the first is described under
+[Generating the lock](#generating-the-lock).
 
 As with `sources.yml`, the hash is the identity and the URLs are only how a
 builder *obtains* the bytes when the object store does not already hold them;
@@ -132,21 +136,53 @@ into the source tree, and then resolves and writes the lock from that. The
 developer never runs the packaging's tooling by hand; `glbx lockfile pkg:<name>`
 remains the whole interface.
 
+#### One run locks one architecture, and merges
+
+A single `glbx lockfile` invocation resolves for exactly **one** target
+architecture — the host architecture by default, or whichever is named by the
+`arch` provider parameter (`--params arch=arm64`). It does not resolve every
+architecture at once. Instead the writer **merges** its one-architecture result
+into whatever lockfile already exists on disk:
+
+- the concrete architectures this run resolved are rewritten wholesale (so
+  re-locking an architecture is idempotent and drops entries it no longer needs);
+- entries for other concrete architectures are preserved untouched;
+- arch-independent `all` entries are preserved too, and the ones this run also
+  resolved are replaced in place rather than duplicated.
+
+So running `glbx lockfile pkg:foo` on an `arm64` host against a lockfile that
+already carries `amd64` pins **adds** the `arm64` pins beside them, yielding a
+dual-architecture file; running it against an empty slate yields a pure `arm64`
+file. A lockfile that pins several architectures is therefore built up one
+architecture at a time — typically by generating it once per architecture, each on
+a host of that architecture (or, for a pure index resolution, any host, since only
+the `debian-kernel` control-generation step actually executes target-architecture
+tooling). The same merge applies to every lock the command produces —
+`build-deps.yml`, `rootfs-deps.yml`, `image-type` / `tooling-deps.yml`, and the
+`tooling-pkg` build-tooling lock all flow through one writer.
+
+One asymmetry follows from the single shared `all` entry: because an `all` file is
+fed into *every* architecture's install set, a single-architecture relock never
+drops an `all` entry it didn't itself re-resolve — dropping one would silently
+remove it from the other architectures' sets too. Pruning an `all` package that no
+architecture needs any more therefore means regenerating the lockfile from a clean
+slate (or re-locking every architecture), not relocking just one.
+
 ### The lockfile records availability, not use
 
 `build-deps.yml` is deliberately **not** authoritative about which tools a given
-build actually installs. It records the full set of tooling *available* to the
-package across all architectures; selecting which of those files to install for
-a particular architecture happens later, when the build chroot is assembled.
+build actually installs. It records the set of tooling *available* to the
+package; selecting which of those files to install for a particular architecture
+happens later, when the build chroot is assembled.
 
-This keeps lockfile generation simple and architecture-symmetric. If a package
-needs a certain tool only when building on one architecture, the generator still
-records that tool unconditionally — resolved for every architecture — rather
-than encoding per-architecture conditionals about what is strictly required. The
-cost is a few unused entries in the file; the benefit is that generating the
-lockfile does not have to reason about architecture-specific build logic, and
-the file reads the same for every architecture. The build step simply takes what
-it needs from the available set and ignores the rest.
+This keeps lockfile generation simple. If a package needs a certain tool only
+sometimes, the generator still records it rather than encoding conditionals about
+what is strictly required; the build step takes what it needs from the available
+set and ignores the rest. The resolved closure can legitimately differ between
+architectures — a tool pulled in for one architecture may be absent for another —
+so a multi-architecture lockfile is not expected to be symmetric across its
+architectures. It carries, per architecture, exactly what that architecture's
+resolution produced.
 
 ## Declaring dependencies: `build.yml`
 
@@ -204,6 +240,18 @@ co-emitted siblings (a build emits them together in one run, so neither waits
 for the other). They exist to describe what a binary *drags into an image's
 runtime closure*, and they are what the binary-package validation stage checks
 for local satisfiability.
+
+### Architecture in hand-authored package refs: `%ARCH%`
+
+A few Debian binary package *names* embed the target architecture — most notably
+the kernel, `linux-image-<version>-cloud-amd64` vs `…-cloud-arm64`. Where such a
+name is written by hand — in a `rootfs-<label>.yml` package list, or in a
+`runtime_depends` / `build_depends` entry — it may use the literal token `%ARCH%`
+in place of the architecture. glbx substitutes the target architecture for the
+token when it reads the ref against a known arch, so a single config serves every
+architecture: `linux:linux-image-<version>-cloud-%ARCH%` resolves to the
+`-cloud-arm64` name on an `arm64` build and the `-cloud-amd64` name on an `amd64`
+build. Names that do not vary by architecture need no token.
 
 ## Building a source package
 
