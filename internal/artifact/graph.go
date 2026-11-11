@@ -68,78 +68,31 @@ func (g *Graph) Build() error {
 		}
 	}
 
-	// Pass 2: wire Depends, plus the consumer-side closure across Includes. If
-	// C.Depends(A) and A.Includes(B), then C also gets an ordering edge to B
-	// (an Includes edge carries zero build order for the includer A itself, so
-	// without this a consumer would not wait on a sibling it consumes). And
-	// crucially, once the walk crosses an Includes edge into B, it continues
-	// through B's *Depends* too: B.Depends(D) means C's install-check resolves
-	// D (walkBinaries follows both includes and extraDeps), yet nothing orders D
-	// before C otherwise — the C→B hop is an Include (no order) so the ordinary
-	// B→D chain never reaches C. Bridging that one Include→Depends boundary is
-	// the fix.
-	//
-	// What the walk must NOT do is flatten ordinary Depends→Depends chains: for
-	// a plain C→A→D the engine already orders D before A before C via pending
-	// counts, so a direct C→D edge would be redundant (and would bloat the
-	// generated CI needs: lists, which are built from these edges). So we follow
-	// a reached node's Depends only once we have crossed an Includes edge
-	// (viaInclude), never along a pure-Depends spine.
-	//
-	// seen is keyed by (node, viaInclude): a node first reached on a pure-Depends
-	// spine may later be reached through an Include, and must then be revisited
-	// so its Depends get pulled into the closure. A itself never gets an edge to
-	// its own includes (the walk is seeded only from a consumer's Depends), so
-	// the sibling-Includes cycle stays broken. Identity is unaffected — it folds
-	// Depends() only. n.deps is populated as pass 2 runs, so read each reached
-	// node's direct Depends via its artifact (through nodeMap), never the
-	// half-built n.deps slice.
+	// Pass 2: wire Depends and propagate includes-closure as additional ordering
+	// edges for the consumer. If A.Includes(B) and C.Depends(A), then C also gets
+	// an ordering edge to B (consumer-side closure), but A itself does NOT get an
+	// edge to B (A doesn't wait for its own includes).
 	for _, n := range g.nodes {
-		type visit struct {
-			node       *node
-			viaInclude bool
-		}
-		seen := make(map[visit]bool)
-		var addEdge func(target *node, viaInclude bool) error
-		addEdge = func(target *node, viaInclude bool) error {
-			v := visit{target, viaInclude}
-			if seen[v] {
-				return nil
+		seen := make(map[*node]bool)
+		var addEdge func(target *node)
+		addEdge = func(target *node) {
+			if seen[target] {
+				return
 			}
-			seen[v] = true
-			// Add the ordering edge once (the first time this node is reached by
-			// any path); a later revisit only continues the walk.
-			if !seen[visit{target, !viaInclude}] {
-				n.deps = append(n.deps, target)
-				target.rdeps = append(target.rdeps, n)
-				n.pending++
-			}
+			seen[target] = true
+			n.deps = append(n.deps, target)
+			target.rdeps = append(target.rdeps, n)
+			n.pending++
 			for _, inc := range target.includes {
-				if err := addEdge(inc, true); err != nil {
-					return err
-				}
+				addEdge(inc)
 			}
-			if viaInclude {
-				for _, dep := range target.artifact.Depends() {
-					depNode, ok := g.nodeMap[dep.Key()]
-					if !ok {
-						return fmt.Errorf("artifact %s depends on %s which is not in the graph", target.artifact.Key(), dep.Key())
-					}
-					if err := addEdge(depNode, true); err != nil {
-						return err
-					}
-				}
-			}
-			return nil
 		}
 		for _, dep := range n.artifact.Depends() {
 			depNode, ok := g.nodeMap[dep.Key()]
 			if !ok {
 				return fmt.Errorf("artifact %s depends on %s which is not in the graph", n.artifact.Key(), dep.Key())
 			}
-			if err := addEdge(depNode, false); err != nil {
-				return err
-			}
+			addEdge(depNode)
 		}
 	}
 
@@ -153,15 +106,12 @@ func (g *Graph) Build() error {
 }
 
 // Discover recursively walks Depends() and Includes() starting from roots,
-// deduplicates by Key(), and wires Depends edges plus the consumer-side closure
-// across Includes: a Depends edge to X adds ordering edges to X's Includes and,
-// once an Includes edge is crossed, onward through those includes' own Depends
-// — so a consumer is ordered after the parts of its runtime/install closure
-// that an Includes hop would otherwise hide (matching walkBinaries). Ordinary
-// Depends→Depends chains are NOT flattened: the engine already orders them via
-// pending counts. Includes contribute zero ordering for the includer itself
-// (no rdeps/pending edge from the includer to its own include) and are excluded
-// from cycle detection. Returns a fully built Graph.
+// deduplicates by Key(), wires Depends edges (with consumer-side includes
+// closure: a Depends edge to X also adds ordering edges to X's transitive
+// Includes), records Includes for closure tracking, and detects cycles.
+// Includes themselves contribute zero ordering for the includer (no rdeps/
+// pending edge from the includer to its include) and are excluded from cycle
+// detection. Returns a fully built Graph.
 func Discover(roots []Artifact) (*Graph, error) {
 	g := &Graph{
 		nodeMap: make(map[string]*node),
@@ -184,40 +134,23 @@ func Discover(roots []Artifact) (*Graph, error) {
 			n.includes = append(n.includes, incNode)
 		}
 
-		// seen is keyed by (node, viaInclude); see Graph.Build pass 2 for the
-		// rationale. We follow a reached node's Depends only once an Includes
-		// edge has been crossed (viaInclude), never along a pure-Depends spine.
-		type visit struct {
-			node       *node
-			viaInclude bool
-		}
-		seen := make(map[visit]bool)
-		var addEdge func(target *node, viaInclude bool)
-		addEdge = func(target *node, viaInclude bool) {
-			v := visit{target, viaInclude}
-			if seen[v] {
+		seen := make(map[*node]bool)
+		var addEdge func(target *node)
+		addEdge = func(target *node) {
+			if seen[target] {
 				return
 			}
-			seen[v] = true
-			if !seen[visit{target, !viaInclude}] {
-				n.deps = append(n.deps, target)
-				target.rdeps = append(target.rdeps, n)
-				n.pending++
-			}
+			seen[target] = true
+			n.deps = append(n.deps, target)
+			target.rdeps = append(target.rdeps, n)
+			n.pending++
 			for _, inc := range target.includes {
-				addEdge(inc, true)
-			}
-			if viaInclude {
-				for _, dep := range target.artifact.Depends() {
-					if depNode, ok := g.nodeMap[dep.Key()]; ok {
-						addEdge(depNode, true)
-					}
-				}
+				addEdge(inc)
 			}
 		}
 		for _, dep := range a.Depends() {
 			depNode := discover(dep)
-			addEdge(depNode, false)
+			addEdge(depNode)
 		}
 		return n
 	}
