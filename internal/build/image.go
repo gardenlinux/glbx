@@ -99,6 +99,8 @@ func (im *Image) setInputs(inputs []imageInput) { im.inputs = inputs }
 
 func (im *Image) ShortName() string { return im.Name }
 
+func (im *Image) GroupKey() string { return im.ShortName() }
+
 // Depends are the one rootfs node, each local_tooling build, and each image
 // named by an image input. These are the only cross-universe edges: image →
 // rootfs, image → tooling build, and image → image.

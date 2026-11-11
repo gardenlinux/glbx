@@ -94,6 +94,8 @@ func (t *ToolingPkgBuild) Key() string {
 
 func (t *ToolingPkgBuild) ShortName() string { return t.Name }
 
+func (t *ToolingPkgBuild) GroupKey() string { return t.ShortName() }
+
 // Depends are the other tooling builds needed at compile time. Edges land only
 // on tooling builds — never a shipped binary — so the tooling universe's build
 // graph is closed.

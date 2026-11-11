@@ -102,7 +102,9 @@ func cmdGraph(args []string) error {
 // stable topological order and built-from edges sorted deterministically. It
 // records structure only (no identities), so it changes when the graph's shape
 // changes, not on every source edit. Each node carries its Key (the unique build
-// handle, used by edges and BuiltStatus) and its ShortName (a display label).
+// handle, used by edges and BuiltStatus), its ShortName (a display label) and its
+// GroupKey (a coarser label grouping related nodes, e.g. all binaries of a source
+// package — used for human-facing collation such as CI job names).
 // BuiltStatus is populated only by --check-built and is omitted otherwise,
 // keeping the plain export stable.
 type graphExport struct {
@@ -114,6 +116,7 @@ type graphExport struct {
 type graphExportNode struct {
 	Key       string `json:"key"`
 	ShortName string `json:"shortName"`
+	GroupKey  string `json:"groupKey"`
 }
 
 type graphExportEdge struct {
@@ -128,7 +131,7 @@ func graphJSON(g *artifact.Graph, builtStatus map[string]bool) (string, error) {
 	order := g.StableTopologicalOrder()
 	nodes := make([]graphExportNode, len(order))
 	for i, a := range order {
-		nodes[i] = graphExportNode{Key: a.Key(), ShortName: a.ShortName()}
+		nodes[i] = graphExportNode{Key: a.Key(), ShortName: a.ShortName(), GroupKey: a.GroupKey()}
 	}
 	edges := g.Edges()
 	exp := graphExport{Nodes: nodes, Edges: make([]graphExportEdge, len(edges)), BuiltStatus: builtStatus}

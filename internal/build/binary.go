@@ -44,6 +44,12 @@ func (b *debianBinaryPkg) ShortName() string {
 	return b.name
 }
 
+// GroupKey is the source package name, so that all binaries produced by the
+// same source build collate into one group (e.g. a single CI job).
+func (b *debianBinaryPkg) GroupKey() string {
+	return b.sourceBuild.Name
+}
+
 func (b *debianBinaryPkg) Depends() []artifact.Artifact {
 	b.resolveExtraDeps()
 	deps := []artifact.Artifact{b.sourceBuild}
