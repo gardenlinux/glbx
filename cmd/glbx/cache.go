@@ -227,8 +227,30 @@ func cacheMap(args []string) error {
 		fmt.Println(v)
 		return nil
 	case "set":
+		// --from reads a JSON alias array (written by publish --aliases-to) and
+		// sets each entry in the local map, so a cold reprod runner can seed the
+		// originals it compares against. Validation is off: the value blobs live
+		// only on the registry at this point, so the later pull-through build
+		// fetches them lazily rather than requiring them present now.
+		if len(args) >= 2 && args[1] == "--from" {
+			if len(args) < 3 {
+				return fmt.Errorf("usage: glbx cache map set --from <file>")
+			}
+			aliases, err := readAliasFile(args[2])
+			if err != nil {
+				return err
+			}
+			for _, a := range aliases {
+				if err := store.Map.Set(a.Key, a.Value, false); err != nil {
+					return fmt.Errorf("set %s -> %s: %w", a.Key, a.Value, err)
+				}
+			}
+			_, l := rootContext(log.Engine)
+			l.Info("set %d local map entries from %s", len(aliases), args[2])
+			return nil
+		}
 		if len(args) < 3 {
-			return fmt.Errorf("usage: glbx cache map set <key> <value>")
+			return fmt.Errorf("usage: glbx cache map set <key> <value> | glbx cache map set --from <file>")
 		}
 		k, err := objstore.NewHash(args[1])
 		if err != nil {

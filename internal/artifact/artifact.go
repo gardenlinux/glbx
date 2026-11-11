@@ -19,7 +19,7 @@ import (
 // A per-artifact-type change does not touch this; each type carries its own
 // seed. $GLBX_ID_SEED_OVERRIDE replaces it at runtime to get an independent
 // cache namespace without editing the source.
-const idSeed = "76fce3f95aee04318b418ce92be1e1f1"
+const idSeed = "133b031920afb33510296ee689345c52"
 
 // IDSeed returns the global identity seed, honoring $GLBX_ID_SEED_OVERRIDE. It
 // is the first element every artifact type folds into its identity.
