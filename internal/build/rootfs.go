@@ -111,6 +111,10 @@ func (r *Rootfs) ShortName() string {
 	return "rootfs-" + r.Label
 }
 
+func (r *Rootfs) GroupKey() string {
+	return r.ShortName()
+}
+
 func (r *Rootfs) Depends() []artifact.Artifact {
 	deps := make([]artifact.Artifact, len(r.DirectDeps))
 	for i, bp := range r.DirectDeps {

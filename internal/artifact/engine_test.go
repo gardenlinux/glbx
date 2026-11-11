@@ -39,6 +39,7 @@ func (m *mockArtifact) Depends() []Artifact  { return m.deps }
 func (m *mockArtifact) Includes() []Artifact { return m.includes }
 func (m *mockArtifact) Inputs() []Input      { return m.inputs }
 func (m *mockArtifact) ShortName() string    { return m.name }
+func (m *mockArtifact) GroupKey() string     { return m.name }
 
 func (m *mockArtifact) OutputRefs(store *objstore.Store) (objstore.Hash, []objstore.Hash, error) {
 	return ResolveOutputRefs(m, store)

@@ -142,6 +142,10 @@ func (s *DebianPkgBuild) ShortName() string {
 	return s.Name
 }
 
+func (s *DebianPkgBuild) GroupKey() string {
+	return s.ShortName()
+}
+
 func (s *DebianPkgBuild) Depends() []artifact.Artifact {
 	s.resolveDeps()
 	return s.DepArtifacts
