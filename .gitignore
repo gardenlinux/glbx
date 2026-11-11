@@ -1,5 +1,7 @@
 # Build outputs and ephemeral state.
 bin/
+bin-amd64/
+bin-arm64/
 doc/book/
 doc/.serve.pid
 doc/.serve.log
