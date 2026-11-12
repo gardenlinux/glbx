@@ -941,6 +941,20 @@ func TestOutputRefs(t *testing.T) {
 		t.Error("manifest blob should exist in store")
 	}
 
+	// ManifestBlobs, given the manifest hash directly, returns that hash plus the
+	// same leaves — no artifact, identity, or graph.
+	mb, err := ManifestBlobs(store, man)
+	if err != nil {
+		t.Fatalf("ManifestBlobs: %v", err)
+	}
+	if len(mb) != 3 || !mb[0].Equal(man) {
+		t.Fatalf("ManifestBlobs: got %v, want manifest hash %s plus 2 leaves", mb, man)
+	}
+	mbLeaves := map[string]bool{mb[1].String(): true, mb[2].String(): true}
+	if !mbLeaves[leaf1.String()] || !mbLeaves[leaf2.String()] {
+		t.Errorf("ManifestBlobs leaves mismatch: %v", mb[1:])
+	}
+
 	// Single-output round-trips too.
 	_, singleLeaves, err := single.OutputRefs(store)
 	if err != nil {

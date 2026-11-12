@@ -63,9 +63,12 @@ func (p *Publisher) EnsureBlob(h Hash) (uploaded, missing bool, err error) {
 	return true, false, nil
 }
 
-// EnsureAlias sets the map-<key> tag if absent, pointing it at the byte-identical
-// one-layer manifest that wraps the value blob. The value blob must have been
-// ensured first; its bytes are read locally to size the layer descriptor.
+// EnsureAlias sets the map-<key> tag if absent, pointing it at the exact
+// manifest blob-<value> already names so the two resolve to the same digest.
+// The value blob must have been published first — every publish path ensures
+// the alias's value is in the blob worklist uploaded ahead of the aliases — so
+// this reads nothing locally and works on a cold runner against blobs a prior
+// run put up.
 func (p *Publisher) EnsureAlias(a MapAlias) (set bool, err error) {
 	exists, err := p.reg.tagExists(mapTag(a.Key))
 	if err != nil {
@@ -74,11 +77,7 @@ func (p *Publisher) EnsureAlias(a MapAlias) (set bool, err error) {
 	if exists {
 		return false, nil
 	}
-	data, err := p.readLocal(a.Value)
-	if err != nil {
-		return false, fmt.Errorf("alias %s: value blob %s not local: %w", a.Key, a.Value, err)
-	}
-	if err := p.reg.aliasMap(a.Key, a.Value, int64(len(data))); err != nil {
+	if err := p.reg.aliasMap(a.Key, a.Value); err != nil {
 		return false, err
 	}
 	return true, nil

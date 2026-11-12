@@ -187,7 +187,7 @@ func TestOCI_MapResolvesToManifestHash(t *testing.T) {
 		t.Fatalf("publish manifest blob: %v", err)
 	}
 	id := MustHash("1212121212121212121212121212121212121212121212121212121212121212")
-	if err := reg.aliasMap(id, mh, int64(len(manifestBlob))); err != nil {
+	if err := reg.aliasMap(id, mh); err != nil {
 		t.Fatalf("aliasMap: %v", err)
 	}
 
@@ -245,6 +245,57 @@ func TestOCI_PublishSkipsBlobAbsentLocally(t *testing.T) {
 	}
 	if up || !missing {
 		t.Errorf("a blob absent locally should be reported missing, not uploaded: up=%v missing=%v", up, missing)
+	}
+}
+
+// TestOCI_EnsureAliasUsesRegistryBlob proves an alias is set by re-tagging the
+// already-published blob on the registry, with the value blob absent from the
+// local store — the cold-runner --aliases-from case.
+func TestOCI_EnsureAliasUsesRegistryBlob(t *testing.T) {
+	reg, _ := newTestRegistry(t)
+
+	// Publish the manifest blob straight to the registry; the publisher's local
+	// store is empty, so the value blob is not available locally.
+	manifestBlob := []byte("deadbeef output.tar\n")
+	mh := HashBytes(manifestBlob)
+	if err := reg.publishBlob(mh, manifestBlob); err != nil {
+		t.Fatalf("publish manifest blob: %v", err)
+	}
+	pub, _ := NewPublisher("http://"+regRef(reg), false, newLocalForTest(t))
+
+	id := MustHash("3434343434343434343434343434343434343434343434343434343434343434")
+	set, err := pub.EnsureAlias(MapAlias{Key: id, Value: mh})
+	if err != nil {
+		t.Fatalf("EnsureAlias: %v", err)
+	}
+	if !set {
+		t.Fatal("EnsureAlias should report the tag as newly set")
+	}
+	got, err := (&remoteMap{reg: reg}).Get(id)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if !got.Equal(mh) {
+		t.Errorf("map resolves to %s, want manifest hash %s", got, mh)
+	}
+
+	// Idempotent: a second call sees the tag present and sets nothing.
+	set, err = pub.EnsureAlias(MapAlias{Key: id, Value: mh})
+	if err != nil || set {
+		t.Fatalf("second EnsureAlias should be a no-op: set=%v err=%v", set, err)
+	}
+}
+
+// TestOCI_EnsureAliasErrorsWhenBlobMissing covers the broken precondition: the
+// value blob is on neither the registry nor the local store.
+func TestOCI_EnsureAliasErrorsWhenBlobMissing(t *testing.T) {
+	reg, _ := newTestRegistry(t)
+	pub, _ := NewPublisher("http://"+regRef(reg), false, newLocalForTest(t))
+
+	id := MustHash("5656565656565656565656565656565656565656565656565656565656565656")
+	absent := MustHash("7878787878787878787878787878787878787878787878787878787878787878")
+	if _, err := pub.EnsureAlias(MapAlias{Key: id, Value: absent}); err == nil {
+		t.Error("EnsureAlias should error when the value blob is not on the registry")
 	}
 }
 
