@@ -290,6 +290,13 @@ user namespace lets it believe it is root with respect to the chroot while being
 unprivileged on the host — and the resulting `.deb`s are read back out into the
 object store.
 
+`dpkg-buildpackage` is run with address-space layout randomization disabled
+(the `ADDR_NO_RANDOMIZE` personality, requested via the exec layer rather than an
+external `setarch`). Some build tooling is non-reproducible under ASLR — notably
+the `bpftool` BTF emission in systemd's BPF programs, where pointer-dependent
+ordering leaks into the embedded BPF skeletons and, downstream, into the linked
+binaries' build-ids. Disabling ASLR removes that source of variance.
+
 ### Deterministic local versioning
 
 Each locally built `.deb` is given a synthetic version suffix derived from the

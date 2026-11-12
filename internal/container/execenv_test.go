@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -1027,5 +1028,69 @@ func TestMountNSOpenWrite(t *testing.T) {
 	}
 	if string(out) != "written via open fd" {
 		t.Fatalf("cat got %q, want %q", string(out), "written via open fd")
+	}
+}
+
+// runCapture runs argv in a fresh user namespace exec env and returns trimmed
+// stdout, failing the test on any error or non-zero exit.
+func runCapture(t *testing.T, stubPath string, disableASLR bool, argv ...string) string {
+	t.Helper()
+	base := NewBaseExecEnv()
+	defer base.Close()
+
+	userNS, err := NewUserNS(UserNSConfig{Ctx: testCtx(), Parent: base, StubPath: stubPath, IDCount: 65536})
+	if err != nil {
+		t.Fatalf("create userns: %v", err)
+	}
+	defer userNS.Close()
+
+	r, w, _ := os.Pipe()
+	devNull, _ := os.Open("/dev/null")
+	defer devNull.Close()
+
+	pid, err := userNS.Exec(&ExecRequest{
+		Argv:        argv,
+		Env:         []string{"PATH=/bin:/usr/bin"},
+		DisableASLR: disableASLR,
+		FDs:         []*os.File{devNull, w, devNull},
+	})
+	w.Close()
+	if err != nil {
+		r.Close()
+		t.Fatalf("exec: %v", err)
+	}
+	out, _ := io.ReadAll(r)
+	r.Close()
+	if code, _ := userNS.Wait(pid); code != 0 {
+		t.Fatalf("exit %d, output: %s", code, string(out))
+	}
+	return strings.TrimSpace(string(out))
+}
+
+// TestDisableASLRPersonality checks that DisableASLR sets the
+// ADDR_NO_RANDOMIZE bit (0x40000) in the child's /proc/self/personality, and
+// that the stub's own personality is restored afterwards (a second exec
+// without the flag comes back clean).
+func TestDisableASLRPersonality(t *testing.T) {
+	stubPath := requireStub(t)
+
+	const readPersonality = "cat /proc/self/personality"
+
+	on := runCapture(t, stubPath, true, "/bin/sh", "-c", readPersonality)
+	v, err := strconv.ParseUint(on, 16, 64)
+	if err != nil {
+		t.Fatalf("parse personality %q: %v", on, err)
+	}
+	if v&0x40000 == 0 {
+		t.Fatalf("ADDR_NO_RANDOMIZE not set: personality=%s", on)
+	}
+
+	off := runCapture(t, stubPath, false, "/bin/sh", "-c", readPersonality)
+	v, err = strconv.ParseUint(off, 16, 64)
+	if err != nil {
+		t.Fatalf("parse personality %q: %v", off, err)
+	}
+	if v&0x40000 != 0 {
+		t.Fatalf("ADDR_NO_RANDOMIZE unexpectedly set without flag: personality=%s", off)
 	}
 }
