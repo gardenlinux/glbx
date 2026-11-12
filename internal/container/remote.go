@@ -105,6 +105,7 @@ func (r *RemoteExecEnv) Exec(req *ExecRequest) (int, error) {
 		UID:          credUID(req.Credentials),
 		GID:          credGID(req.Credentials),
 		UnshareFlags: uint64(req.UnshareFlags),
+		DisableASLR:  req.DisableASLR,
 	})
 	if err != nil {
 		return 0, fmt.Errorf("remote exec: encode: %w", err)

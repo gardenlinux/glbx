@@ -20,7 +20,7 @@ import (
 // derivation incompatible with prior cache entries:
 //
 //	openssl rand -hex 16
-const toolingSeed = "a3f1c9e2b7d04856af2e1c3b9d6e4f70"
+const toolingSeed = "33d23330bf2ac70e4a5c44b9c3363ca7"
 
 // ToolingPkgBuild is an image-assembly tool package's source build. It is its
 // own artifact universe: a distinct key namespace, an identity that can never
