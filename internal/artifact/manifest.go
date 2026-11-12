@@ -61,6 +61,22 @@ func parseManifestBlob(store *objstore.Store, manifestHash objstore.Hash) ([]Out
 	return outputs, nil
 }
 
+// ManifestBlobs returns the manifest blob hash followed by every leaf hash it
+// references, i.e. the full set of blobs reachable from a manifest. It reads and
+// parses the manifest blob directly, needing no artifact, identity, or graph.
+func ManifestBlobs(store *objstore.Store, manifestHash objstore.Hash) ([]objstore.Hash, error) {
+	outputs, err := parseManifestBlob(store, manifestHash)
+	if err != nil {
+		return nil, fmt.Errorf("parse manifest %s: %w", manifestHash, err)
+	}
+	blobs := make([]objstore.Hash, 0, len(outputs)+1)
+	blobs = append(blobs, manifestHash)
+	for _, o := range outputs {
+		blobs = append(blobs, o.Hash)
+	}
+	return blobs, nil
+}
+
 // ResolveOutputs resolves a built artifact's identity → map → manifest blob and
 // returns its named outputs. It errors if the artifact has no map entry (not
 // built).
