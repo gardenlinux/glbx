@@ -74,6 +74,7 @@ func cmdPublish(args []string) error {
 	stubPath := fs.String("stub", "", "path to exec_env_stub binary")
 	aliasesTo := fs.String("aliases-to", "", "publish blobs only and write the map aliases as a JSON array to this file instead of setting them on the registry")
 	aliasesFrom := fs.String("aliases-from", "", "publish only the map aliases read from this JSON file (set by an earlier --aliases-to run); no blobs")
+	jobs := fs.Int("jobs", 0, "max concurrent registry round-trips (0 = default)")
 	fs.Parse(args)
 
 	if *aliasesTo != "" && *aliasesFrom != "" {
@@ -176,6 +177,9 @@ func cmdPublish(args []string) error {
 	pub, err := objstore.NewPublisher(ref, insecure, store.Blobs)
 	if err != nil {
 		return fmt.Errorf("open publisher: %w", err)
+	}
+	if *jobs > 0 {
+		pub.Concurrency = *jobs
 	}
 	progress := func(done, total int, kind, refName, outcome string) {
 		l.Info("[%d/%d] %s %s %s", done, total, outcome, kind, refName)
