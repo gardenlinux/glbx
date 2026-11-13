@@ -431,7 +431,7 @@ func (r *Rootfs) extractLayers(ctx context.Context, mountNS *container.MountNS, 
 func (r *Rootfs) runDpkg(ctx context.Context, mountNS *container.MountNS, store *objstore.Store, installPkgs []rootfsLocalPkg, inputs map[string]objstore.Hash, paths *rootfsPaths, stubPath string) error {
 	l := log.From(ctx, log.Rootfs)
 
-	overlayOpts := fmt.Sprintf("lowerdir=%s:%s,upperdir=%s,workdir=%s", paths.layer0, paths.layer1, paths.layer2, paths.layer2work)
+	overlayOpts := fmt.Sprintf("lowerdir=%s:%s,upperdir=%s,workdir=%s,userxattr", paths.layer0, paths.layer1, paths.layer2, paths.layer2work)
 	if err := mountNS.Mount("overlay", paths.merged, "overlay", 0, overlayOpts); err != nil {
 		return fmt.Errorf("mount overlay: %w", err)
 	}
