@@ -439,13 +439,18 @@ func (r *ociRegistry) publishBlob(h Hash, data []byte) error {
 	return nil
 }
 
-// aliasMap points the map-<id> tag at the one-layer manifest wrapping the
-// manifest blob of the given hash and size — the byte-identical manifest
-// blob-<manifestHash> already names. It introduces no object beyond the extra
-// tag.
-func (r *ociRegistry) aliasMap(id, manifestHash Hash, manifestSize int64) error {
-	m := oneLayerManifest(manifestHash, manifestSize)
-	return r.putManifest(mapTag(id), m)
+// aliasMap points the map-<id> tag at the exact manifest blob-<value> already
+// names, by resolving that manifest and re-putting it under the map tag. map-<id>
+// and blob-<value> then resolve to the same manifest digest, so the map entry is
+// a pure registry-side tag over an already-published blob — no local bytes, no
+// size computation. It assumes blob-<value> is present, the published-blobs-first
+// contract every publish path upholds.
+func (r *ociRegistry) aliasMap(id, value Hash) error {
+	m, err := r.getManifest(blobTag(value))
+	if err != nil {
+		return fmt.Errorf("resolve blob %s: %w", value, err)
+	}
+	return r.putManifest(mapTag(id), *m)
 }
 
 // hashOf parses a "sha256:<hex>" descriptor digest back into a Hash. It is used

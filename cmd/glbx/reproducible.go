@@ -38,7 +38,12 @@ func cmdBuildCheckReproducible(args []string) error {
 	stubPath := fs.String("stub", "", "path to exec_env_stub binary")
 	target := fs.String("target", "", "check only the node with this Key (e.g. rootfs:base:amd64); otherwise check every node")
 	report := fs.String("report", "", "write the JSON reproducibility report to this file (required)")
+	stream := fs.Bool("stream", false, "forward the target's rebuild logs live to the console instead of the task UI (requires --target)")
 	fs.Parse(args)
+
+	if *stream && *target == "" {
+		return fmt.Errorf("--stream requires --target")
+	}
 
 	if *report == "" {
 		return fmt.Errorf("--check-reproducible requires --report <file>")
@@ -100,10 +105,18 @@ func cmdBuildCheckReproducible(args []string) error {
 	interactive := term.IsTerminal(int(os.Stdout.Fd())) && term.IsTerminal(int(os.Stderr.Fd()))
 	var overview *taskui.TaskOverview
 	var viewer *taskui.NonInteractiveViewer
-	if interactive {
+	var streamPrinter *log.LogPrinter
+
+	switch {
+	case *stream:
+		if t, ok := taskMap[*target]; ok {
+			streamPrinter = log.NewLogPrinter(t.Log)
+			streamPrinter.Run()
+		}
+	case interactive:
 		overview = newLogOverview(tracker)
 		overview.Show()
-	} else {
+	default:
 		viewer = taskui.NewNonInteractiveViewer(tracker)
 		viewer.Start()
 	}
@@ -126,9 +139,14 @@ func cmdBuildCheckReproducible(args []string) error {
 
 	results, runErr := artifact.CheckReproducible(ctx, graph, store, targets, *jobs, hooks)
 
-	if interactive {
+	switch {
+	case *stream:
+		if streamPrinter != nil {
+			streamPrinter.Stop()
+		}
+	case interactive:
 		overview.Hide()
-	} else {
+	default:
 		viewer.Stop()
 	}
 

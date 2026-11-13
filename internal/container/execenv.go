@@ -22,7 +22,10 @@ type ExecRequest struct {
 	ResetEnv     bool
 	Credentials  *Credentials
 	UnshareFlags uintptr
-	FDs          []*os.File
+	// DisableASLR disables address-space layout randomization for the
+	// spawned process (ADDR_NO_RANDOMIZE personality).
+	DisableASLR bool
+	FDs         []*os.File
 }
 
 type ExecEnv interface {

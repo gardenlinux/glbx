@@ -336,7 +336,10 @@ func (s *DebianPkgBuild) runBuildInContainer(ctx context.Context, cont *containe
 		return err
 	}
 	pid, err := cont.Exec(&container.ExecRequest{
-		Argv:        []string{"dpkg-buildpackage", "--no-sign"},
+		Argv: []string{"dpkg-buildpackage", "--no-sign"},
+		// Disable ASLR for the build: some tooling (e.g. bpftool used by the
+		// systemd pkg build) is non-reproducible under address randomization.
+		DisableASLR: true,
 		Env:         buildEnv,
 		Cwd:         srcPath,
 		Credentials: buildCreds,

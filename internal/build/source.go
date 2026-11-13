@@ -27,7 +27,7 @@ import (
 // prior cache entries:
 //
 //	openssl rand -hex 16
-const sourceSeed = "2ddbb5227edeb4f7a1895e5fa18fd47b"
+const sourceSeed = "71826f64e9d7ba5b672dcd75982cb9c4"
 
 // localVersionSuffix separates a package's base version from the content-derived
 // local-build suffix (base+gl~<srcHash[:8]>).
@@ -142,6 +142,10 @@ func (s *DebianPkgBuild) ShortName() string {
 	return s.Name
 }
 
+func (s *DebianPkgBuild) GroupKey() string {
+	return s.ShortName()
+}
+
 func (s *DebianPkgBuild) Depends() []artifact.Artifact {
 	s.resolveDeps()
 	return s.DepArtifacts
@@ -165,7 +169,7 @@ func (s *DebianPkgBuild) resolveDeps() {
 		return
 	}
 	for _, depSpec := range buildYML.BuildDepends {
-		src, bin, ok := strings.Cut(depSpec, ":")
+		src, bin, ok := strings.Cut(buildcfg.SubstArch(depSpec, s.Arch), ":")
 		if !ok {
 			continue
 		}

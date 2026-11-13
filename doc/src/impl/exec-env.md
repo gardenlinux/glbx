@@ -194,9 +194,15 @@ type ExecRequest struct {
 	ResetEnv     bool        // replace inherited base with minimal PATH-only env
 	Credentials  *Credentials
 	UnshareFlags uintptr     // CLONE_NEW* flags for the child
+	DisableASLR  bool        // run the child with ADDR_NO_RANDOMIZE (no ASLR)
 	FDs          []*os.File  // FDs[0..2] → stdio, FDs[3:] → ExtraFiles
 }
 ```
+
+`DisableASLR` is honored only by `RemoteExecEnv` (the stub path); `BaseExecEnv`
+ignores it. It exists for reproducibility: some build tooling (e.g. the `bpftool`
+BTF emission in the systemd package build) produces different output under address
+randomization, and disabling ASLR for the build makes it deterministic.
 
 ### The two concrete implementations
 
@@ -376,8 +382,14 @@ The handlers are thin wrappers over `os`/`syscall`:
   `ipc.ResolveEnv` the host uses, applying `Cloneflags`/`Credential` from the
   payload, and wiring any received fds into stdio/`ExtraFiles` (falling back to the
   stub's own stdio when none are passed). It records the child and replies with its
-  pid. `handleWait` waits a recorded pid and replies with its exit code,
-  translating an `*exec.ExitError` into the exit code rather than a transport
+  pid. When the payload's `DisableASLR` is set, the fork is wrapped so the child
+  runs with the `ADDR_NO_RANDOMIZE` personality bit: the handler locks its OS thread
+  (`personality(2)` is per-thread and inherited across fork), ORs the bit onto the
+  current personality, forks, then restores the old personality. Pinning the thread
+  guarantees the fork happens on the thread whose personality was changed, and the
+  restore leaves the stub itself unaffected; the serial serve loop means this never
+  races another handler. `handleWait` waits a recorded pid and replies with its exit
+  code, translating an `*exec.ExitError` into the exit code rather than a transport
   error.
 - `handleMount`/`handleUmount`/`handleMkdir`/`handleCreateFile`/`handleSymlink`/
   `handleRmdir`/`handleUnlink` are direct `syscall`/`os` calls, each replying

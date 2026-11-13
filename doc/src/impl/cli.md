@@ -158,6 +158,11 @@ namespace (`provider.LookupLockGenerator` + `provider.ParseTarget`). The target 
 `--params`/`--params-help <ns>` as for `import`. `--output <dir>` is the
 working-tree root (default `.`). `--stub` supplies the `exec_env_stub` path, which
 only a container-backed generator (`debian-kernel`) needs. `--cache` as usual.
+`lockfile` has **no** `--arch` flag: the target architecture is a provider
+parameter (`--params arch=<arch>`, default the host arch). One invocation locks
+one architecture and the writer merges it into any existing lock, so a
+multi-architecture lockfile is produced by running the command once per
+architecture (see [package-build](../concepts/package-build.md#one-run-locks-one-architecture-and-merges)).
 
 ### `build` — `build.go`, `reproducible.go`
 
@@ -272,13 +277,28 @@ half of the warm-cache path that `publish` then mirrors.
 
 Mirrors a checkout's locally-held content to an OCI registry, reading the local
 store directly (never through the registry it is filling) and uploading only the
-blobs and aliases the registry lacks — so it is idempotent on re-run. The worklist
-is the union of the recorded inputs (`restore.InputHashes`) and the built outputs
-(`graphResult.BuiltOutputs`), deduplicated. `--target <Key>` scopes to a single
-built node's manifest, output blobs, and identity alias (its inputs were published
-by the jobs that built its dependencies). The registry comes from `--registry` or
-`$GLBX_REGISTRY`; `--arch`, `--cache`, `--conf-dir`, `--stub` as usual.
-Per-item progress is logged `[done/total] outcome kind ref`.
+blobs and aliases the registry lacks — so it is idempotent on re-run. Every run
+reduces to one worklist of blobs and identity→manifest map aliases, selected by
+mode:
+
+- default: the union of the recorded inputs (`restore.InputHashes`) and the built
+  outputs (`graphResult.BuiltOutputs`), deduplicated.
+- `--target <Key>`: one built node's manifest, output blobs, and identity alias
+  (its inputs were published by the jobs that built its dependencies).
+- `--manifest <hash>`: the manifest blob with that hash and every blob it
+  references (`artifact.ManifestBlobs`), with no alias — the low-level form of
+  `--target` for a caller that already holds the manifest hash.
+- `--aliases-from <file>`: only the aliases from a JSON file written by an earlier
+  `--aliases-to` run; no blobs. Setting a map tag re-tags the manifest the
+  already-published `blob-<value>` names, so the value blob is assumed present on
+  the registry and nothing is read locally.
+- `--aliases-to <file>`: a modifier on the blob-bearing modes — publish the blobs
+  but write the aliases to the file instead of setting them, deferring the map
+  tags until a reproducibility check passes.
+
+The registry comes from `--registry` or `$GLBX_REGISTRY`; `--arch`, `--cache`,
+`--conf-dir`, `--stub` as usual. Per-item progress is logged
+`[done/total] outcome kind ref`.
 
 ### `resolve` — `resolve.go`
 

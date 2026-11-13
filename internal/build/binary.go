@@ -44,13 +44,74 @@ func (b *debianBinaryPkg) ShortName() string {
 	return b.name
 }
 
+// GroupKey is the source package name, so that all binaries produced by the
+// same source build collate into one group (e.g. a single CI job).
+func (b *debianBinaryPkg) GroupKey() string {
+	return b.sourceBuild.Name
+}
+
 func (b *debianBinaryPkg) Depends() []artifact.Artifact {
 	b.resolveExtraDeps()
 	deps := []artifact.Artifact{b.sourceBuild}
 	for _, extra := range b.extraDeps {
 		deps = append(deps, extra)
 	}
+	// Order this binary after the cross-source build closure that is reachable
+	// only through its sibling Includes. The install check resolves this
+	// binary's full runtime closure (buildLocalIndex walks extraDeps AND
+	// includes), so every artifact that closure loads must be built first. A
+	// sibling Include carries no build-order edge for the includer (it is
+	// co-produced by the shared source build, already a Depends, so ordering
+	// against it would be a cycle) — but the sibling's *own* cross-source
+	// dependencies are a different source build and are otherwise unordered
+	// against us. Example: libpam-runtime Includes libpam-modules (both from the
+	// pam source build); libpam-modules Depends glibc:libc6. Without this edge
+	// nothing orders libc6 before libpam-runtime's install check, which fails
+	// with "libc6 not in index". These are ordering edges only: Identity folds
+	// extraDeps and sibling Keys directly (not Depends()), so it is unaffected.
+	for _, extra := range b.includeExtraDeps() {
+		deps = append(deps, extra)
+	}
 	return deps
+}
+
+// includeExtraDeps returns the cross-source binary packages reachable from this
+// binary's sibling Includes (transitively through further sibling Includes),
+// i.e. the extraDeps of the same-source closure. Same-source siblings are
+// excluded — they impose no build order and are covered by the shared source
+// build. The result is the set of different-source binaries the install check
+// will load via its includes that are not already direct extraDeps of this
+// binary. Each returned node brings its own Depends chain, so transitive
+// ordering of their subtrees needs no extra edges here.
+func (b *debianBinaryPkg) includeExtraDeps() []*debianBinaryPkg {
+	b.resolveExtraDeps()
+	seen := map[string]bool{}
+	var out []*debianBinaryPkg
+	// Walk the same-source sibling closure, collecting cross-source extraDeps.
+	var walkSiblings func(sib *debianBinaryPkg)
+	visited := map[string]bool{}
+	walkSiblings = func(sib *debianBinaryPkg) {
+		key := sib.sourceBuild.Name + ":" + sib.name
+		if visited[key] {
+			return
+		}
+		visited[key] = true
+		sib.resolveExtraDeps()
+		for _, dep := range sib.extraDeps {
+			k := dep.sourceBuild.Name + ":" + dep.name
+			if !seen[k] {
+				seen[k] = true
+				out = append(out, dep)
+			}
+		}
+		for _, inc := range sib.includes {
+			walkSiblings(inc)
+		}
+	}
+	for _, inc := range b.includes {
+		walkSiblings(inc)
+	}
+	return out
 }
 
 // Includes returns sibling binaries from the same source build referenced via
@@ -89,14 +150,25 @@ func (b *debianBinaryPkg) resolveExtraDeps() {
 		}
 	}
 
-	for _, depSpec := range buildYML.RuntimeDepends[b.name] {
-		if src, bin, ok := strings.Cut(depSpec, ":"); ok {
-			addDep(src, bin)
+	// runtime_depends is keyed by produced binary name, and both keys and values
+	// may carry the %ARCH% placeholder (the kernel's arch-flavoured binaries).
+	// b.name is already arch-concrete (it came from the resolved package set), so
+	// substitute the placeholder in the config keys to match it, and in the dep
+	// values before resolving them.
+	arch := b.sourceBuild.Arch
+	for key, deps := range buildYML.RuntimeDepends {
+		if buildcfg.SubstArch(key, arch) != b.name {
+			continue
+		}
+		for _, depSpec := range deps {
+			if src, bin, ok := strings.Cut(buildcfg.SubstArch(depSpec, arch), ":"); ok {
+				addDep(src, bin)
+			}
 		}
 	}
 	// build_depends are locally built too, so they count toward locality.
 	for _, depSpec := range buildYML.BuildDepends {
-		if src, bin, ok := strings.Cut(depSpec, ":"); ok {
+		if src, bin, ok := strings.Cut(buildcfg.SubstArch(depSpec, arch), ":"); ok {
 			addDep(src, bin)
 		}
 	}
@@ -296,11 +368,17 @@ func (b *debianBinaryPkg) lockfileDepNames() []string {
 	if err != nil {
 		return nil
 	}
-	ldeps, ok := buildYML.LockfileDeps[b.name]
-	if !ok {
-		return nil
+	// Keys may carry %ARCH%; b.name is arch-concrete. Match after substitution.
+	arch := b.sourceBuild.Arch
+	for key, ldeps := range buildYML.LockfileDeps {
+		if buildcfg.SubstArch(key, arch) != b.name {
+			continue
+		}
+		out := make([]string, len(ldeps))
+		for i, d := range ldeps {
+			out[i] = buildcfg.SubstArch(d, arch)
+		}
+		return out
 	}
-	out := make([]string, len(ldeps))
-	copy(out, ldeps)
-	return out
+	return nil
 }

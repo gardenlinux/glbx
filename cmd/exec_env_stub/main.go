@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"runtime"
 	"sync"
 	"syscall"
 
@@ -43,6 +44,39 @@ func main() {
 type stubServer struct {
 	mu    sync.Mutex
 	procs map[int]*exec.Cmd
+}
+
+// ADDR_NO_RANDOMIZE is the personality(2) bit that disables address-space
+// layout randomization for the task and its exec'd children.
+const ADDR_NO_RANDOMIZE = 0x0040000
+
+// startCmd starts cmd. When disableASLR is set, it clears ASLR for the
+// spawned process by setting the ADDR_NO_RANDOMIZE personality bit, which the
+// child inherits across fork and keeps across execve.
+//
+// personality(2) is per-thread and inherited by fork, so we pin the goroutine
+// to its OS thread for the set → fork → restore window to ensure the fork in
+// cmd.Start() happens on the thread we modified, and to leave the stub's own
+// personality unchanged afterwards. The IPC server dispatches requests
+// serially, so this does not contend with other handlers.
+func startCmd(cmd *exec.Cmd, disableASLR bool) error {
+	if !disableASLR {
+		return cmd.Start()
+	}
+
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+
+	old, _, errno := syscall.RawSyscall(syscall.SYS_PERSONALITY, 0xffffffff, 0, 0)
+	if errno != 0 {
+		return fmt.Errorf("get personality: %w", errno)
+	}
+	if _, _, errno := syscall.RawSyscall(syscall.SYS_PERSONALITY, old|ADDR_NO_RANDOMIZE, 0, 0); errno != 0 {
+		return fmt.Errorf("set personality: %w", errno)
+	}
+	defer syscall.RawSyscall(syscall.SYS_PERSONALITY, old, 0, 0)
+
+	return cmd.Start()
 }
 
 func (s *stubServer) handleExec(payload []byte, fds []*os.File) ([]byte, []*os.File, error) {
@@ -89,7 +123,7 @@ func (s *stubServer) handleExec(payload []byte, fds []*os.File) ([]byte, []*os.F
 		cmd.Stderr = os.Stderr
 	}
 
-	if err := cmd.Start(); err != nil {
+	if err := startCmd(cmd, p.DisableASLR); err != nil {
 		closeFDs(fds)
 		return nil, nil, fmt.Errorf("start: %w", err)
 	}

@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/gardenlinux/glbx/internal/buildcfg"
 	"github.com/gardenlinux/glbx/internal/container"
 	"github.com/gardenlinux/glbx/internal/debian/index"
 	"github.com/gardenlinux/glbx/internal/lockfile"
@@ -125,6 +126,12 @@ func TestBootstrapAndInstallVim(t *testing.T) {
 
 	ctx := log.WithTarget(context.Background(), log.NewConsoleTarget())
 
+	// This test downloads real .debs and executes dpkg from them natively inside
+	// the sandbox, so it must target the host architecture — running foreign-arch
+	// binaries natively (e.g. amd64 dpkg on arm64) fails with "exec format error".
+	arch := buildcfg.HostArch()
+	t.Logf("host arch: %s", arch)
+
 	stubPath := requireStub(t)
 	t.Logf("stub: %s", stubPath)
 
@@ -140,7 +147,7 @@ func TestBootstrapAndInstallVim(t *testing.T) {
 	t.Logf("store: %s", storeDir)
 
 	t.Log("fetching Debian testing index...")
-	idx, err := lockfile.FetchBinaryIndex(ctx, store, "https://deb.debian.org/debian", "testing", "amd64", "bootstrap-test")
+	idx, err := lockfile.FetchBinaryIndex(ctx, store, "https://deb.debian.org/debian", "testing", arch, "bootstrap-test")
 	if err != nil {
 		// No network / DNS / repo unavailable — skip rather than fail. Other
 		// packages exercise FetchBinaryIndex with a httptest server already.
@@ -154,7 +161,7 @@ func TestBootstrapAndInstallVim(t *testing.T) {
 	}
 	t.Logf("essential packages: %d", len(coreNames))
 
-	corePkgs, err := Resolve(idx, "amd64", coreNames)
+	corePkgs, err := Resolve(idx, arch, coreNames)
 	if err != nil {
 		t.Fatalf("resolve core: %v", err)
 	}
@@ -194,7 +201,7 @@ func TestBootstrapAndInstallVim(t *testing.T) {
 	mountNS.Mkdir("/tmp", 01777)
 
 	t.Log("bootstrapping container...")
-	cont, rootfsPath, cleanup, err := Bootstrap(ctx, mountNS, store, idx, "amd64", stubPath)
+	cont, rootfsPath, cleanup, err := Bootstrap(ctx, mountNS, store, idx, arch, stubPath)
 	if cleanup != nil {
 		defer cleanup()
 	}
@@ -205,7 +212,7 @@ func TestBootstrapAndInstallVim(t *testing.T) {
 
 	t.Log("bootstrap succeeded; installing vim...")
 
-	vimPkgs, err := Resolve(idx, "amd64", []string{"vim"})
+	vimPkgs, err := Resolve(idx, arch, []string{"vim"})
 	if err != nil {
 		t.Fatalf("resolve vim: %v", err)
 	}
