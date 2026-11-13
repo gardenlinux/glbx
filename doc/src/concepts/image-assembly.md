@@ -220,6 +220,11 @@ disk image to that path and exits. The image's identity is passed in the
 environment as `GLBX_IMAGE_ID`, so the script can derive every on-disk
 identifier a tool would otherwise randomize — filesystem, partition and disk
 UUIDs, hash seeds — deterministically from it rather than from `/dev/urandom`.
+The target architecture is passed as `GLBX_ARCH`, so a script can select
+architecture-dependent on-disk metadata — for example the GPT root partition type
+GUID, which the Discoverable Partitions Specification defines per architecture, so
+that systemd's gpt-auto-generator recognizes the root partition on the machine the
+image targets.
 The script runs inside the sandbox with broad capabilities — enough to mount a
 tmpfs for its own scratch space — but **no loop device is set up for it**, so a
 type populates a filesystem from a directory tree (`mke2fs -d`, and the like)

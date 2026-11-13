@@ -99,6 +99,8 @@ func (im *Image) setInputs(inputs []imageInput) { im.inputs = inputs }
 
 func (im *Image) ShortName() string { return im.Name }
 
+func (im *Image) GroupKey() string { return im.ShortName() }
+
 // Depends are the one rootfs node, each local_tooling build, and each image
 // named by an image input. These are the only cross-universe edges: image →
 // rootfs, image → tooling build, and image → image.
@@ -423,6 +425,11 @@ func (im *Image) Build(ctx artifact.BuildContext) ([]artifact.Output, error) {
 		"PATH=/usr/sbin:/usr/bin:/sbin:/bin",
 		"GLBX_IMAGE_ID=" + identity.String(),
 		"GLBX_INPUTS_DIR=" + inInputs,
+		// The target architecture, so an assembly script can select
+		// arch-dependent on-disk metadata (e.g. the Discoverable Partitions
+		// Spec root partition type GUID, which differs per arch). Purely
+		// additive: a script that doesn't need it ignores it.
+		"GLBX_ARCH=" + im.Arch,
 	}, nil, "/", inScript, inRootfs, inOutput); err != nil {
 		cont.Close()
 		return nil, fmt.Errorf("assembly script: %w", err)

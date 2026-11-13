@@ -307,6 +307,16 @@ silently emulated.
   the container), and `cert_file` (`CertFile`, the matching X.509 cert, folded
   into the build identity and served over the signing socket).
 
+Hand-authored package refs — `runtime_depends`/`build_depends` values and the
+`rootfs-<label>.yml` package lists — may contain the literal token
+`buildcfg.ArchPlaceholder` (`%ARCH%`) where a binary package name embeds the
+architecture (the kernel's `…-cloud-%ARCH%`). `buildcfg.SubstArch(s, arch)`
+expands it against the target arch at the consumption sites (rootfs package lists,
+`runtime_depends` key matching and values, `build_depends` values,
+`lockfile_deps` names). On `amd64` the expansion is byte-identical to writing
+`-amd64` directly, so the token only adds the ability to target other arches from
+one config.
+
 #### The reduced tooling schema
 
 `ValidateToolingBuildYML(b)` enforces the narrower schema used by assembly-tool
@@ -338,6 +348,19 @@ and `URLs` are cold-cache retrieval locations. The YAML shape is a top-level
 `FilesForArch(tools, arch)` is the selector the installers use: for each tool it
 returns the file whose `Arch` equals the target arch *or* is `all`, flattening
 the per-tool variants into the exact set to install for one architecture.
+
+The writer (`lockfile.writeBuildDeps`, shared by all three file kinds) is a
+**merge**, not an overwrite. A generation run resolves one architecture; the
+writer rewrites that architecture's concrete entries wholesale, preserves every
+other concrete architecture's entries, and preserves all `all` entries —
+replacing (not duplicating) the `all` entries this run also resolved. That is how
+one `glbx lockfile` run on an `arm64` host adds `arm64` pins beside committed
+`amd64` ones. `all` is deliberately excluded from the "wholesale rewrite" set:
+since `FilesForArch` feeds every `all` file into every architecture's set,
+dropping an `all` entry on a single-architecture relock would corrupt the other
+architectures' sets, so stale `all` entries are pruned only by regenerating from
+an empty file. Output is sorted (tools by name, files by arch) for a deterministic
+result independent of resolution order.
 
 ### `rootfs-<label>.yml` — rootfs variants
 

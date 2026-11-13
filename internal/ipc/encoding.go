@@ -52,6 +52,10 @@ type ExecPayload struct {
 	UID          uint32
 	GID          uint32
 	UnshareFlags uint64
+	// DisableASLR runs the process with the ADDR_NO_RANDOMIZE personality
+	// bit set, disabling address-space layout randomization, to make
+	// otherwise ASLR-sensitive build tooling produce reproducible output.
+	DisableASLR bool
 }
 
 type MountPayload struct {

@@ -68,6 +68,10 @@ func NewRootfs(cfg RootfsConfig) (*Rootfs, error) {
 
 	var deps []*debianBinaryPkg
 	for _, spec := range entries {
+		// Substitute the %ARCH% placeholder (e.g. in the kernel's
+		// linux-image-...-cloud-%ARCH% ref) with the target architecture so a
+		// single rootfs config resolves on every arch.
+		spec = buildcfg.SubstArch(spec, cfg.Arch)
 		parts := strings.SplitN(spec, ":", 2)
 		if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
 			return nil, fmt.Errorf("rootfs-%s.yml: %q must be in src:pkg format", cfg.Label, spec)
@@ -105,6 +109,10 @@ func newRootfsDirect(label, arch string, deps []*debianBinaryPkg, store *objstor
 
 func (r *Rootfs) ShortName() string {
 	return "rootfs-" + r.Label
+}
+
+func (r *Rootfs) GroupKey() string {
+	return r.ShortName()
 }
 
 func (r *Rootfs) Depends() []artifact.Artifact {

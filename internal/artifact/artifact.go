@@ -19,7 +19,7 @@ import (
 // A per-artifact-type change does not touch this; each type carries its own
 // seed. $GLBX_ID_SEED_OVERRIDE replaces it at runtime to get an independent
 // cache namespace without editing the source.
-const idSeed = "0cd41e1dddf3c1fc2f4c6bd523345898"
+const idSeed = "133b031920afb33510296ee689345c52"
 
 // IDSeed returns the global identity seed, honoring $GLBX_ID_SEED_OVERRIDE. It
 // is the first element every artifact type folds into its identity.
@@ -83,4 +83,11 @@ type Artifact interface {
 	// Key it is not guaranteed globally unique — it is for human-facing output,
 	// not identity.
 	ShortName() string
+	// GroupKey is a label identifying the group an artifact belongs to, used to
+	// collate related nodes in human-facing output (e.g. CI job names). For most
+	// artifact kinds it coincides with ShortName. The exception is a binary
+	// package, whose GroupKey is its source package name rather than the binary
+	// name, so that every binary produced by one source build shares a group.
+	// Like ShortName it is not guaranteed globally unique.
+	GroupKey() string
 }

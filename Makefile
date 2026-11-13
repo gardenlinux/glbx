@@ -1,4 +1,4 @@
-.PHONY: all build build_demo fmt vet test e2e doc proto clean
+.PHONY: all build cross build_demo fmt vet test e2e doc proto clean
 
 # bin/ is the canonical build output. Tests and the e2e driver consume the
 # binaries from here rather than rebuilding via `go build`.
@@ -24,6 +24,21 @@ build: proto
 	@mkdir -p $(BIN_DIR)
 	go build -o $(GLBX_BIN) ./cmd/glbx
 	go build -o $(STUB_BIN) ./cmd/exec_env_stub
+
+# Cross-compile both binaries for every shipped architecture into a per-arch
+# directory (bin-<arch>/). glbx is pure Go (no cgo), so GOARCH alone yields a
+# correct binary for any host — CI uses this to produce one glbx-bin-<arch>
+# artifact per architecture from a single runner. The graph/plan/restore paths
+# the artifact drives are arch-agnostic; only the native per-node build must run
+# on its own architecture (handled by the runner selection, not here).
+CROSS_ARCHES := amd64 arm64
+cross: proto
+	@for a in $(CROSS_ARCHES); do \
+		mkdir -p bin-$$a; \
+		echo "building bin-$$a/glbx bin-$$a/exec_env_stub (GOARCH=$$a)"; \
+		GOOS=linux GOARCH=$$a go build -o bin-$$a/glbx ./cmd/glbx || exit 1; \
+		GOOS=linux GOARCH=$$a go build -o bin-$$a/exec_env_stub ./cmd/exec_env_stub || exit 1; \
+	done
 
 # Regenerate the signing protobuf bindings. protoc resolves protoc-gen-go from
 # $PATH and $(go env GOPATH)/bin.
@@ -60,4 +75,4 @@ doc:
 	mdbook build doc
 
 clean:
-	rm -rf $(BIN_DIR) doc/book $(SIGN_PB)
+	rm -rf $(BIN_DIR) bin-amd64 bin-arm64 doc/book $(SIGN_PB)
