@@ -374,6 +374,61 @@ that the artifact is built; its presence is what every cache-hit check tests.
 callers (GC, publish) use to enumerate a built node's blobs — both error cleanly
 when a node has no map entry, so a walker can skip an unbuilt node.
 
+## The provenance output and manifest uniqueness
+
+A manifest that named only an artifact's payload and control outputs would hash
+*solely* by output bytes — so two builds that emit byte-identical outputs would
+collide on one manifest hash even when their histories differ. A `fixture` source
+build emitting exactly `fixture.deb` and `control:fixture`, and the binary
+validation that re-emits those two files unchanged, are the standing example: with
+output bytes alone they would be indistinguishable. Changing a build input while
+producing identical payloads creates the same collision.
+
+To close this, every output set carries one extra reserved output,
+`.glbx-provenance`. It is an ordinary blob, referenced from the manifest alongside
+the payload and control outputs, whose bytes are the deterministic JSON
+
+```json
+{"identity":"cfeb7cbe4d6401d11ddc2232ac5a325d01c2f8cdcfcfd6a39ef47d153b8aa0a8","target":"debian-pkg-build:fixture:amd64"}
+```
+
+— the build's full target key and its graph identity (which already folds in the
+inputs). The manifest then lists it with the payload and control, so for the
+worked example the serialized manifest is
+
+```text
+b3fa0c811641d9be9fd4691179433c04efda8b8815993c38405251fcb456116e .glbx-provenance
+8e9e15289a973e1215bd5cec4f8133558df06ab10a06e9439311f8794b2141c9 control:fixture
+2df8489d2a625c46969f0199ed9385b48c556268ab269b8aa871132607f6f45a fixture.deb
+```
+
+Because the bytes are deterministic, an identical rebuild reproduces the same
+`.glbx-provenance` blob and hence the same manifest hash, so the reproducibility
+check and cache-hit logic above are unaffected. But changing the target, the graph
+identity, or any named output now changes the manifest hash — the hash tracks the
+build's history, not only its output bytes. The SBOM namespace and the build-run
+timestamp are deliberately *not* folded in, so they do not perturb it.
+
+The entry rides the generic manifest machinery: `SerializeManifest`,
+`parseManifestBlob`, GC and publish treat `.glbx-provenance` like any other named
+output. Consumers that materialize payloads — the Debian package, rootfs and image
+build actions — exclude it from what they ship, so it never reaches a shipped
+artifact.
+
+This guarantee is bounded by what the graph identity covers. If glbx runs a script
+through a symlink, the effective script contents are what matter to the history;
+and if two builds consume different realized dependencies under the *same* graph
+identity yet still emit identical files, that is a reproducibility fault —
+`--check-reproducible` reports the provenance discrepancy rather than letting one
+result silently stand in for the other. The single system-wide lever is the global
+identity seed, which feeds the graph identity recorded here; a future incompatible
+change can rotate it to force fresh manifest hashes across the board.
+
+The reason this uniqueness property is worth its extra output is spelled out in
+[SBOMs](../concepts/sbom.md#why-byte-identical-outputs-still-get-distinct-sboms):
+glbx keys exactly one SPDX document per manifest hash, which only works when
+distinct build histories have distinct manifest hashes.
+
 ## Logs keyed by identity
 
 Each node's build log is stored as its own blob and reachable from the node's
