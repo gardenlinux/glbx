@@ -103,6 +103,12 @@ the consumer (`internal/artifact`, `parseManifestBlob`), which splits each line
 on the first space back into hash and name; objstore owns only the forward
 direction so there is one authority for the format.
 
+One of the named outputs is always the reserved `.glbx-provenance` blob, which
+folds the build's target and graph identity into the manifest so that distinct
+builds with identical payloads still get distinct manifest hashes; objstore treats
+it as an ordinary entry, and [the engine chapter](./engine.md#the-provenance-output-and-manifest-uniqueness)
+covers why it is there.
+
 ### BlobStore
 
 ```go

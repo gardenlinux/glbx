@@ -105,12 +105,32 @@ func TestImageBuildE2E(t *testing.T) {
 		}
 		ids[id.String()] = true
 		// The /pkgs staging area used to bind-mount local .debs for dpkg must not
-		// survive into the packed image.
-		assertNoPkgsStaging(t, store, leaves[0])
+		// survive into the packed image. Select the rootfs tarball output by name
+		// rather than by position — the manifest also carries the sorted-first
+		// .glbx-provenance output, so leaves[0] is not necessarily the tarball.
+		assertNoPkgsStaging(t, store, rootfsTarball(t, rootfs, store))
 	}
 	if len(ids) != 2 {
 		t.Fatalf("expected 2 distinct rootfs identities, got %d", len(ids))
 	}
+}
+
+// rootfsTarball resolves a built rootfs artifact's "rootfs.tar.gz" output by name
+// and returns its blob hash. Selecting by name (not position) is robust to the
+// manifest also carrying the reserved .glbx-provenance output.
+func rootfsTarball(t *testing.T, a artifact.Artifact, store *objstore.Store) objstore.Hash {
+	t.Helper()
+	outputs, err := artifact.ResolveOutputs(a, store)
+	if err != nil {
+		t.Fatalf("%s resolve outputs: %v", a.Key(), err)
+	}
+	for _, o := range outputs {
+		if o.Name == "rootfs.tar.gz" {
+			return o.Hash
+		}
+	}
+	t.Fatalf("%s: no rootfs.tar.gz output in %+v", a.Key(), outputs)
+	return objstore.Hash{}
 }
 
 // assertNoPkgsStaging fails if the packed rootfs tar contains a top-level pkgs/

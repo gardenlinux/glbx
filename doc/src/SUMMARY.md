@@ -14,6 +14,7 @@
 - [Package building](./concepts/package-build.md)
 - [Image assembly](./concepts/image-assembly.md)
 - [Distributed builds & CI](./concepts/distributed-builds.md)
+- [SBOMs](./concepts/sbom.md)
 - [The execution environment](./concepts/exec-env.md)
 - [Out-of-container signing](./concepts/out-of-container-signing.md)
 

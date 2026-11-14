@@ -462,8 +462,25 @@ func (e *Engine) buildNode(ctx context.Context, n *node) BuildResult {
 		return fail(err)
 	}
 
-	if err := e.storeManifest(identity, outputs); err != nil {
+	// Fold the reserved .glbx-provenance output into the result before storing the
+	// manifest, so the manifest hash reflects the build's target and identity (not
+	// only its payload bytes). withProvenance is byte-identical to the path the
+	// reproducibility check uses, so a reproducible rebuild still matches.
+	outputs, err = withProvenance(outputs, identity, n.artifact.Key(), e.store)
+	if err != nil {
+		return fail(fmt.Errorf("add provenance: %w", err))
+	}
+
+	manifestHash, err := e.storeManifest(identity, outputs)
+	if err != nil {
 		return fail(fmt.Errorf("store manifest: %w", err))
+	}
+
+	// Write the artifact's SBOM document and its map entry to the local store,
+	// keyed by the output-manifest hash and the active SBOM namespace. A failure
+	// here fails the build loudly — this is scaffolding we want to notice breaking.
+	if err := e.storeSBOM(ctx, n.artifact, manifestHash); err != nil {
+		return fail(fmt.Errorf("store sbom: %w", err))
 	}
 
 	eng.Info("complete: %s (%d outputs)", n.artifact.Key(), len(outputs))

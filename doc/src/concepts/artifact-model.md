@@ -43,12 +43,26 @@ packages, binary packages, and images is a fact about which code constructs the
 artifacts and what their build actions do; it is invisible to the traversal.
 This is what lets one traversal drive the entire system.
 
+### The output manifest
+
 An artifact's result is a **manifest**: the set of blobs the build produced,
 named within the artifact. A source build's manifest is every `.deb` it emitted;
 a binary package's manifest is the single `.deb` it selected and re-emitted; an
 image's manifest is the assembled rootfs or disk image. A dependent does not
 take "the result" wholesale — it names which part of a dependency's manifest it
 consumes, which is what the edge records.
+
+Alongside those payload and control outputs, every manifest also names one
+reserved `.glbx-provenance` output: a small blob whose deterministic bytes fold
+in the build's target key and graph identity. It makes the manifest hash a
+function of the build's *history*, not only of its output bytes — so two builds
+that happen to emit identical payloads (a recompile versus its validation, or the
+same bytes from a changed input) still get distinct manifest hashes. Nothing
+downstream ships it: the payloads of packages, root filesystems and images
+exclude it. The exact bytes are in
+[the engine implementation](../impl/engine.md#the-provenance-output-and-manifest-uniqueness);
+the property it buys is what lets glbx key one SBOM per manifest hash
+([SBOMs](./sbom.md#why-byte-identical-outputs-still-get-distinct-sboms)).
 
 ## The dependency edges
 

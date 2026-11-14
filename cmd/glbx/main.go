@@ -36,6 +36,8 @@ func main() {
 		err = cmdRestoreCache(args)
 	case "publish":
 		err = cmdPublish(args)
+	case "sbom":
+		err = cmdSBOM(args)
 	case "resolve":
 		err = cmdResolve(args)
 	case "status":
@@ -61,5 +63,5 @@ func main() {
 
 func usage() {
 	fmt.Fprintln(os.Stderr, "usage: glbx <command> [arguments]")
-	fmt.Fprintln(os.Stderr, "commands: import, get-pkg-metadata, check-updates, lockfile, build, graph, cache, restore-cache, resolve, status, exec-chroot")
+	fmt.Fprintln(os.Stderr, "commands: import, get-pkg-metadata, check-updates, lockfile, build, graph, cache, restore-cache, publish, sbom, resolve, status, exec-chroot")
 }

@@ -22,6 +22,7 @@ type mockArtifact struct {
 	inputs   []Input
 	identity string
 	buildFn  func(BuildContext) ([]Output, error)
+	sbom     []byte
 	built    bool
 	mu       sync.Mutex
 }
@@ -53,6 +54,12 @@ func (m *mockArtifact) Build(ctx BuildContext) ([]Output, error) {
 		return m.buildFn(ctx)
 	}
 	return nil, nil
+}
+
+// SBOM returns the configured placeholder bytes, or nil when unset (the latter
+// exercises the "no SBOM for this kind" path in the engine).
+func (m *mockArtifact) SBOM(ctx context.Context) ([]byte, error) {
+	return m.sbom, nil
 }
 
 func TestGraphEmpty(t *testing.T) {
@@ -553,16 +560,20 @@ func TestManifestRoundTrip(t *testing.T) {
 		t.Fatalf("unexpected result: %v", results)
 	}
 
-	// Verify outputs stored on node
+	// Verify outputs stored on node: the two declared outputs plus the reserved
+	// .glbx-provenance output the engine folds in.
 	outputs := g.OutputsOf(a)
-	if len(outputs) != 2 {
-		t.Fatalf("expected 2 outputs, got %d", len(outputs))
+	if len(outputs) != 3 {
+		t.Fatalf("expected 3 outputs (2 declared + provenance), got %d", len(outputs))
 	}
 	if outputs[0].Name != "pkg_1.0_amd64.deb" || outputs[0].Hash != h1 {
 		t.Fatalf("unexpected output[0]: %+v", outputs[0])
 	}
 	if outputs[1].Name != "control:pkg" || outputs[1].Hash != h2 {
 		t.Fatalf("unexpected output[1]: %+v", outputs[1])
+	}
+	if outputs[2].Name != ProvenanceOutputName {
+		t.Fatalf("expected output[2] to be %s, got %+v", ProvenanceOutputName, outputs[2])
 	}
 
 	// Verify manifest was stored in map
@@ -614,17 +625,21 @@ func TestResolveOutputs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(outputs) != 2 {
-		t.Fatalf("expected 2 outputs, got %d", len(outputs))
+	// The two declared outputs plus the reserved .glbx-provenance output.
+	if len(outputs) != 3 {
+		t.Fatalf("expected 3 outputs (2 declared + provenance), got %d", len(outputs))
 	}
-	// Manifests are canonically sorted by Name, independent of the order the
-	// artifact emitted them, so the entries come back in ascending-name order.
-	if outputs[0].Name != "manifest.json" || outputs[1].Name != "rootfs.tar.gz" {
-		t.Fatalf("unexpected output names: %+v", outputs)
+	byName := make(map[string]Output, len(outputs))
+	for _, o := range outputs {
+		byName[o.Name] = o
+	}
+	for _, name := range []string{"manifest.json", "rootfs.tar.gz", ProvenanceOutputName} {
+		if _, ok := byName[name]; !ok {
+			t.Fatalf("missing output %q; got %+v", name, outputs)
+		}
 	}
 
 	// The output hash resolves to an on-disk blob path.
-	byName := map[string]Output{outputs[0].Name: outputs[0], outputs[1].Name: outputs[1]}
 	path, err := store.Blobs.Path(byName["rootfs.tar.gz"].Hash)
 	if err != nil {
 		t.Fatalf("resolve path: %v", err)
@@ -921,7 +936,7 @@ func TestOutputRefs(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Multi-output: manifest hash + exactly its two leaves.
+	// Multi-output: manifest hash + its two declared leaves + the provenance leaf.
 	man, leaves, err := multi.OutputRefs(store)
 	if err != nil {
 		t.Fatalf("multi.OutputRefs: %v", err)
@@ -929,10 +944,13 @@ func TestOutputRefs(t *testing.T) {
 	if man.IsZero() {
 		t.Error("manifest hash should be non-zero")
 	}
-	if len(leaves) != 2 {
-		t.Fatalf("multi leaves: got %d, want 2", len(leaves))
+	if len(leaves) != 3 {
+		t.Fatalf("multi leaves: got %d, want 3 (2 declared + provenance)", len(leaves))
 	}
-	gotLeaves := map[string]bool{leaves[0].String(): true, leaves[1].String(): true}
+	gotLeaves := map[string]bool{}
+	for _, l := range leaves {
+		gotLeaves[l.String()] = true
+	}
 	if !gotLeaves[leaf1.String()] || !gotLeaves[leaf2.String()] {
 		t.Errorf("multi leaves mismatch: %v", leaves)
 	}
@@ -947,20 +965,27 @@ func TestOutputRefs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ManifestBlobs: %v", err)
 	}
-	if len(mb) != 3 || !mb[0].Equal(man) {
-		t.Fatalf("ManifestBlobs: got %v, want manifest hash %s plus 2 leaves", mb, man)
+	if len(mb) != 4 || !mb[0].Equal(man) {
+		t.Fatalf("ManifestBlobs: got %v, want manifest hash %s plus 3 leaves", mb, man)
 	}
-	mbLeaves := map[string]bool{mb[1].String(): true, mb[2].String(): true}
+	mbLeaves := map[string]bool{}
+	for _, l := range mb[1:] {
+		mbLeaves[l.String()] = true
+	}
 	if !mbLeaves[leaf1.String()] || !mbLeaves[leaf2.String()] {
 		t.Errorf("ManifestBlobs leaves mismatch: %v", mb[1:])
 	}
 
-	// Single-output round-trips too.
+	// Single-output round-trips too: its one declared leaf plus the provenance leaf.
 	_, singleLeaves, err := single.OutputRefs(store)
 	if err != nil {
 		t.Fatalf("single.OutputRefs: %v", err)
 	}
-	if len(singleLeaves) != 1 || !singleLeaves[0].Equal(leaf1) {
+	singleSet := map[string]bool{}
+	for _, l := range singleLeaves {
+		singleSet[l.String()] = true
+	}
+	if len(singleLeaves) != 2 || !singleSet[leaf1.String()] {
 		t.Errorf("single leaves: %v", singleLeaves)
 	}
 

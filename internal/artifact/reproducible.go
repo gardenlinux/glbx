@@ -43,6 +43,7 @@ type ReproHooks struct {
 // needs already exists in the store.
 type checkTarget struct {
 	artifact Artifact
+	identity objstore.Hash
 	original objstore.Hash
 	inputs   map[string]objstore.Hash
 }
@@ -89,7 +90,7 @@ func CheckReproducible(ctx context.Context, g *Graph, store *objstore.Store, tar
 		if err != nil {
 			return nil, fmt.Errorf("resolve inputs for %s: %w", key, err)
 		}
-		checks = append(checks, checkTarget{artifact: a, original: original, inputs: inputs})
+		checks = append(checks, checkTarget{artifact: a, identity: identity, original: original, inputs: inputs})
 	}
 
 	results := make([]ReproResult, len(checks))
@@ -126,6 +127,13 @@ func checkOne(ctx context.Context, store *objstore.Store, c checkTarget, hooks R
 	outputs, err := c.artifact.Build(BuildContext{Ctx: nodeCtx, Store: store, Inputs: c.inputs})
 	if err != nil {
 		l.Error("%s: rebuild FAILED: %v", c.artifact.ShortName(), err)
+		res.Err = err
+	} else if outputs, err = withProvenance(outputs, c.identity, c.artifact.Key(), store); err != nil {
+		// Fold in the reserved .glbx-provenance output exactly as the normal build
+		// path does, so the reproduced manifest hash is comparable to the original
+		// (which also includes provenance). No SBOM or map entry is written — a
+		// reproducibility run perturbs nothing.
+		l.Error("%s: add provenance: %v", c.artifact.ShortName(), err)
 		res.Err = err
 	} else {
 		// Store the reproduced manifest as a blob (no map entry, as the whole run

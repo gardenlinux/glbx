@@ -72,6 +72,13 @@ type Artifact interface {
 	Includes() []Artifact
 	Inputs() []Input
 	Build(ctx BuildContext) ([]Output, error)
+	// SBOM returns the artifact's serialized SBOM document bytes, or nil if this
+	// artifact kind produces none (SBOMs are optional per kind, not a forced
+	// requirement). The engine writes the returned bytes to the store after the
+	// manifest, keyed by the output-manifest hash and the active SBOM namespace.
+	// Scaffolding stage: implementations return a tiny placeholder; real SPDX
+	// generation comes later.
+	SBOM(ctx context.Context) ([]byte, error)
 	// OutputRefs returns the blob references for an artifact that has already
 	// been built, without building. manifest is the hash of the map's target
 	// blob (the local manifest / entrypoint); leaves are the output blobs it

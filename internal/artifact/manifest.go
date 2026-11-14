@@ -19,14 +19,18 @@ func SerializeManifest(outputs []Output) string {
 }
 
 // storeManifest serializes outputs as "<hash> <name>\n" lines, stores as a blob,
-// and maps identity → manifest blob hash.
-func (e *Engine) storeManifest(identity objstore.Hash, outputs []Output) error {
+// and maps identity → manifest blob hash. Returns the manifest blob hash so the
+// caller can derive dependent keys (e.g. the SBOM map key) from it.
+func (e *Engine) storeManifest(identity objstore.Hash, outputs []Output) (objstore.Hash, error) {
 	manifest := SerializeManifest(outputs)
 	manifestHash, err := e.store.Blobs.Store(strings.NewReader(manifest))
 	if err != nil {
-		return fmt.Errorf("store manifest blob: %w", err)
+		return objstore.Hash{}, fmt.Errorf("store manifest blob: %w", err)
 	}
-	return e.store.Map.Set(identity, manifestHash, false)
+	if err := e.store.Map.Set(identity, manifestHash, false); err != nil {
+		return objstore.Hash{}, err
+	}
+	return manifestHash, nil
 }
 
 // parseManifestBlob reads and parses a manifest blob into its outputs.
