@@ -17,6 +17,11 @@ import (
 type publishPlan struct {
 	blobs   []objstore.Hash
 	aliases []objstore.MapAlias
+	// manifests are the output-manifest hashes of the selected built artifacts —
+	// the roots whose SBOM closures get a sbom-<M> tag. SBOM blobs, SBOM map
+	// aliases and closures are derived from these and uploaded unconditionally
+	// (never withheld by --aliases-to), so --aliases-from carries none.
+	manifests []objstore.Hash
 }
 
 type aliasJSON struct {
@@ -111,7 +116,7 @@ func cmdPublish(args []string) error {
 			return publishPlan{}, fmt.Errorf("--manifest: %w", err)
 		}
 		blobs, err := artifact.ManifestBlobs(store, hash)
-		return publishPlan{blobs: blobs}, err
+		return publishPlan{blobs: blobs, manifests: []objstore.Hash{hash}}, err
 	}
 
 	fromGraph := func(confDir, arch, stubPath, target string) (publishPlan, error) {
@@ -135,18 +140,22 @@ func cmdPublish(args []string) error {
 		}
 
 		if target != "" {
-			blobs, aliases, err := graph.BuiltOutputsFor(store, target)
-			return publishPlan{blobs: blobs, aliases: aliases}, err
+			blobs, aliases, manifest, err := graph.BuiltOutputsFor(store, target)
+			if err != nil {
+				return publishPlan{}, err
+			}
+			return publishPlan{blobs: blobs, aliases: aliases, manifests: []objstore.Hash{manifest}}, nil
 		}
 
 		inputs, err := restore.InputHashes(confRoot, arch)
 		if err != nil {
 			return publishPlan{}, fmt.Errorf("enumerate inputs: %w", err)
 		}
-		outputs, aliases := graph.BuiltOutputs(store)
+		outputs, aliases, manifests := graph.BuiltOutputs(store)
 		return publishPlan{
-			blobs:   dedupHashes(append(inputs, outputs...)),
-			aliases: aliases,
+			blobs:     dedupHashes(append(inputs, outputs...)),
+			aliases:   aliases,
+			manifests: manifests,
 		}, nil
 	}
 
@@ -163,16 +172,27 @@ func cmdPublish(args []string) error {
 		return err
 	}
 
-	// Withhold aliases until the reproducibility check passes.
+	// Resolve the SBOM closures of the selected manifests. SBOM document blobs and
+	// their map aliases are uploaded unconditionally (never withheld by
+	// --aliases-to), and each selected manifest gets a sbom-<M> closure tag.
+	// --aliases-from carries no manifests, so this is empty on the alias-only run —
+	// the SBOMs were already uploaded by the earlier --aliases-to run.
+	sbom := collectSBOMs(store, sbomNamespace(), plan.manifests, l)
+	plan.blobs = append(plan.blobs, sbom.blobs...)
+
+	// Withhold the reproducibility-gated graph aliases until a later --aliases-from
+	// run, but always publish the SBOM map aliases now.
+	publishAliases := append(append([]objstore.MapAlias{}, plan.aliases...), sbom.aliases...)
 	if *aliasesTo != "" {
 		if err := writeAliasFile(*aliasesTo, plan.aliases); err != nil {
 			return err
 		}
-		l.Info("wrote %d aliases to %s; publishing blobs only", len(plan.aliases), *aliasesTo)
-		plan.aliases = nil
+		l.Info("wrote %d aliases to %s; publishing blobs and %d sbom aliases", len(plan.aliases), *aliasesTo, len(sbom.aliases))
+		publishAliases = sbom.aliases
 	}
 
-	l.Info("publishing to %s: %d blobs, %d aliases (arch %s)", ref, len(plan.blobs), len(plan.aliases), *arch)
+	l.Info("publishing to %s: %d blobs, %d aliases, %d sbom closures (arch %s)",
+		ref, len(plan.blobs), len(publishAliases), len(sbom.closures), *arch)
 
 	pub, err := objstore.NewPublisher(ref, insecure, store.Blobs)
 	if err != nil {
@@ -184,9 +204,25 @@ func cmdPublish(args []string) error {
 	progress := func(done, total int, kind, refName, outcome string) {
 		l.Info("[%d/%d] %s %s %s", done, total, outcome, kind, refName)
 	}
-	res, err := pub.Publish(plan.blobs, plan.aliases, progress)
+	res, err := pub.Publish(plan.blobs, publishAliases, progress)
 	if err != nil {
 		return fmt.Errorf("publish: %w", err)
+	}
+
+	// Push the sbom-<M> closure tags after their document blobs are up. Each is
+	// never overwritten: a prior publisher of the same manifest wins the race.
+	closuresSet := 0
+	for _, c := range sbom.closures {
+		set, err := pub.EnsureSBOMClosure(c.root, c.layers)
+		if err != nil {
+			return fmt.Errorf("publish sbom closure %s: %w", c.root, err)
+		}
+		if set {
+			closuresSet++
+		}
+	}
+	if len(sbom.closures) > 0 {
+		l.Info("sbom closures: %d set, %d already present", closuresSet, len(sbom.closures)-closuresSet)
 	}
 
 	l.Info("published: %d blobs uploaded, %d already present, %d missing locally; %d aliases set, %d present",
@@ -209,4 +245,90 @@ func dedupHashes(in []objstore.Hash) []objstore.Hash {
 		out = append(out, h)
 	}
 	return out
+}
+
+// sbomNamespace is the SBOM namespace this publish operates in. Published SBOMs
+// and their closure tags live under it; it mirrors the generator's namespace.
+func sbomNamespace() string { return artifact.SBOMNamespace() }
+
+// sbomClosureSpec is one sbom-<root> closure tag to publish and the ordered SPDX
+// document layers it aggregates.
+type sbomClosureSpec struct {
+	root   objstore.Hash
+	layers []objstore.SBOMClosureLayer
+}
+
+// sbomPublishSet is the SBOM portion of a publish: the document blobs and their
+// map aliases (uploaded unconditionally via the ordinary worklist) and the
+// per-root closure tags.
+type sbomPublishSet struct {
+	blobs    []objstore.Hash
+	aliases  []objstore.MapAlias
+	closures []sbomClosureSpec
+}
+
+// collectSBOMs resolves the SPDX import closure of each selected manifest and
+// assembles the SBOM publish set: every closure document's blob and K(A,M)→D map
+// alias (deduplicated across all closures), plus one closure tag per selected
+// root. A manifest whose SBOM is absent locally is skipped with a warning — a
+// cache built before SBOMs or whose generation was skipped still publishes its
+// payload. Resolution reads only the local store.
+func collectSBOMs(store *objstore.Store, namespace string, manifests []objstore.Hash, l *log.Logger) sbomPublishSet {
+	var set sbomPublishSet
+	seenBlob := map[string]struct{}{}
+	seenAlias := map[string]struct{}{}
+	seenRoot := map[string]struct{}{}
+
+	for _, m := range manifests {
+		if _, done := seenRoot[m.String()]; done {
+			continue
+		}
+		seenRoot[m.String()] = struct{}{}
+
+		refs, found, err := artifact.SBOMClosure(store, namespace, m)
+		if err != nil {
+			l.Warn("sbom closure for %s incomplete, skipping its sbom: %v", m.Short(), err)
+			continue
+		}
+		if !found {
+			l.Warn("no sbom for %s in namespace %q; skipping its sbom", m.Short(), namespace)
+			continue
+		}
+
+		layers := make([]objstore.SBOMClosureLayer, 0, len(refs))
+		for _, r := range refs {
+			if _, ok := seenBlob[r.Doc.String()]; !ok {
+				seenBlob[r.Doc.String()] = struct{}{}
+				set.blobs = append(set.blobs, r.Doc)
+			}
+			if _, ok := seenAlias[r.MapKey.String()]; !ok {
+				seenAlias[r.MapKey.String()] = struct{}{}
+				set.aliases = append(set.aliases, objstore.MapAlias{Key: r.MapKey, Value: r.Doc})
+			}
+			size, err := blobSize(store, r.Doc)
+			if err != nil {
+				l.Warn("sbom blob %s for %s missing locally; skipping closure of %s", r.Doc.Short(), r.Manifest.Short(), m.Short())
+				layers = nil
+				break
+			}
+			layers = append(layers, objstore.SBOMClosureLayer{Doc: r.Doc, Size: size, Manifest: r.Manifest})
+		}
+		if len(layers) > 0 {
+			set.closures = append(set.closures, sbomClosureSpec{root: m, layers: layers})
+		}
+	}
+	return set
+}
+
+// blobSize returns the on-disk byte size of a local blob.
+func blobSize(store *objstore.Store, h objstore.Hash) (int64, error) {
+	p, err := store.Blobs.Path(h)
+	if err != nil {
+		return 0, err
+	}
+	info, err := os.Stat(p)
+	if err != nil {
+		return 0, err
+	}
+	return info.Size(), nil
 }

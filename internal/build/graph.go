@@ -272,7 +272,7 @@ func buildImages(cfg GraphConfig, ts *ToolingSet, rootfsByLabel map[string]*Root
 // records it. A node not yet built contributes nothing. This is the single
 // enumeration both garbage collection (which keeps the blobs) and publishing
 // (which mirrors the blobs and sets the aliases on a remote) consume.
-func (gr *GraphResult) BuiltOutputs(store *objstore.Store) (blobs []objstore.Hash, aliases []objstore.MapAlias) {
+func (gr *GraphResult) BuiltOutputs(store *objstore.Store) (blobs []objstore.Hash, aliases []objstore.MapAlias, manifests []objstore.Hash) {
 	for _, key := range gr.Graph.Keys() {
 		a := gr.Graph.Find(key)
 		manifest, leaves, err := a.OutputRefs(store)
@@ -286,6 +286,7 @@ func (gr *GraphResult) BuiltOutputs(store *objstore.Store) (blobs []objstore.Has
 		blobs = append(blobs, manifest)
 		blobs = append(blobs, leaves...)
 		aliases = append(aliases, objstore.MapAlias{Key: identity, Value: manifest})
+		manifests = append(manifests, manifest)
 		// A built node may also have a recorded log; mirror it so a cold
 		// checkout can view logs. Gating on the node being built ensures a log
 		// is never published without its outputs.
@@ -294,24 +295,24 @@ func (gr *GraphResult) BuiltOutputs(store *objstore.Store) (blobs []objstore.Has
 			aliases = append(aliases, logAlias)
 		}
 	}
-	return blobs, aliases
+	return blobs, aliases, manifests
 }
 
 // BuiltOutputsFor collects the blobs and identity→manifest alias of a single
 // built node, selected by Key(). It is the per-node form of BuiltOutputs,
 // publishing exactly one node's result without the whole-graph enumeration.
-func (gr *GraphResult) BuiltOutputsFor(store *objstore.Store, key string) (blobs []objstore.Hash, aliases []objstore.MapAlias, err error) {
+func (gr *GraphResult) BuiltOutputsFor(store *objstore.Store, key string) (blobs []objstore.Hash, aliases []objstore.MapAlias, manifest objstore.Hash, err error) {
 	a := gr.Graph.Find(key)
 	if a == nil {
-		return nil, nil, fmt.Errorf("no artifact with Key %q in graph", key)
+		return nil, nil, objstore.Hash{}, fmt.Errorf("no artifact with Key %q in graph", key)
 	}
 	manifest, leaves, err := a.OutputRefs(store)
 	if err != nil {
-		return nil, nil, fmt.Errorf("%s not built: %w", key, err)
+		return nil, nil, objstore.Hash{}, fmt.Errorf("%s not built: %w", key, err)
 	}
 	identity, err := a.Identity()
 	if err != nil {
-		return nil, nil, fmt.Errorf("compute identity for %s: %w", key, err)
+		return nil, nil, objstore.Hash{}, fmt.Errorf("compute identity for %s: %w", key, err)
 	}
 	blobs = append(blobs, manifest)
 	blobs = append(blobs, leaves...)
@@ -320,7 +321,7 @@ func (gr *GraphResult) BuiltOutputsFor(store *objstore.Store, key string) (blobs
 		blobs = append(blobs, logAlias.Value)
 		aliases = append(aliases, logAlias)
 	}
-	return blobs, aliases, nil
+	return blobs, aliases, manifest, nil
 }
 
 func parseSrcPkg(spec string) (src, pkg string, err error) {
