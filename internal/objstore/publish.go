@@ -98,6 +98,28 @@ func (p *Publisher) EnsureAlias(a MapAlias) (set bool, err error) {
 	return true, nil
 }
 
+// EnsureSBOMClosure publishes the sbom-<M> aggregate manifest for output-manifest
+// hash m, whose layers reference the SPDX document blobs of the whole import
+// closure. It never overwrites: if the tag already exists, a prior publisher won
+// the race and this is a no-op (set=false). The closure document blobs must have
+// been uploaded first (through the ordinary blob worklist, as blob-<D> tags) so
+// the registry already holds every sha256:<D> the manifest references. Layers are
+// pushed in the given order (root first, then sorted producers).
+func (p *Publisher) EnsureSBOMClosure(m Hash, layers []SBOMClosureLayer) (set bool, err error) {
+	tag := sbomClosureTag(m)
+	exists, err := p.reg.tagExists(tag)
+	if err != nil {
+		return false, fmt.Errorf("check sbom closure %s: %w", m, err)
+	}
+	if exists {
+		return false, nil
+	}
+	if err := p.reg.putManifest(tag, closureManifest(layers)); err != nil {
+		return false, fmt.Errorf("push sbom closure %s: %w", m, err)
+	}
+	return true, nil
+}
+
 // PublishProgress observes a Publish run item by item. done counts items
 // finished so far (1-based) against total, kind is "blob" or "alias", ref names
 // the item (hash or identity), and outcome is a short word: "uploaded",

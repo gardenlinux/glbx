@@ -121,4 +121,44 @@ artifact kind that produces no SBOM returns `nil`.
 fold, and `storeSBOM`, which the engine calls after `storeManifest`. The SBOM
 document is written as an ordinary object-store blob and bound by a map entry
 under the folded key; a `nil` SBOM is a no-op. This is local-store only —
-publishing SBOMs to a remote is a separate step.
+publication is the separate step below.
+
+## Publishing SBOMs
+
+`glbx publish` uploads SBOMs in two layers (the OCI section of the
+[concept chapter](../concepts/sbom.md#oci-layout-and-publication) fixes the
+contract):
+
+1. **Native layer** — each SBOM document blob `D` and its `K(A,M)→D` map entry go
+   up as ordinary objstore blob + `map-<K>` alias, so a normal pull-through
+   consumer resolves SBOMs with no special handling.
+2. **Convenience layer** — a `sbom-<M>` OCI manifest aggregating the whole SPDX
+   import closure of `M` as `application/spdx+json` layers (titled
+   `<N>.spdx.json`), so `oras pull` fetches the closure in one call.
+
+**Closure resolution** is `artifact.SBOMClosure(store, namespace, M)`: it resolves
+`M → K(A,M) → D`, parses the document's `SpdxDocument.import` entries for producer
+manifest hashes `N`, and recurses, returning the root-first, producer-sorted
+`SBOMRef` list. A root whose SBOM is absent locally yields `found=false` (no
+error) so a legacy/partial cache still publishes its payload; a *referenced*
+producer that is missing is an error (an incomplete closure is never published).
+
+**Command plumbing** (`cmd/glbx/publish.go`): each publish source
+(`fromGraph` / `fromManifest`) records the selected output-manifest hashes;
+`collectSBOMs` turns them into the native blob + alias worklist (deduplicated
+across closures) and one closure spec per selected root. The native SBOM blobs and
+aliases are uploaded **unconditionally** — crucially, they bypass the
+`--aliases-to` reproducibility withholding, so a `build` runner that defers its
+graph aliases still uploads SBOMs, and the later `--aliases-from` run carries none
+(the manifest set is empty on that path). Closure tags are pushed after
+`Publish` so their layer blobs are already up.
+
+**Never overwrite.** `Publisher.EnsureSBOMClosure` (and `EnsureAlias` for the map
+entry) check `tagExists` before writing: if `sbom-<M>` or `map-<K>` already
+exists, a prior publisher won and this is a no-op. First writer wins; concurrent
+rebuilds of one `M` converge. The `manifest`/`descriptor` structs in `remote.go`
+carry an `artifactType` and per-layer `annotations` for the closure manifest.
+
+**GC retention.** `cache gc`'s keep-set (`cmd/glbx/cache.go`) also pins every
+reachable artifact's SBOM closure blobs, so a locally generated SBOM is never
+reclaimed while its artifact is still reachable from the graph.

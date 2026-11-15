@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 
+	"github.com/gardenlinux/glbx/internal/artifact"
 	"github.com/gardenlinux/glbx/internal/build"
 	"github.com/gardenlinux/glbx/internal/buildcfg"
 	"github.com/gardenlinux/glbx/internal/log"
@@ -84,9 +85,18 @@ func cacheGC(args []string) error {
 		if err != nil {
 			return fmt.Errorf("build graph: %w", err)
 		}
-		blobs, _ := graphResult.BuiltOutputs(store)
+		blobs, _, manifests := graphResult.BuiltOutputs(store)
 		for _, h := range blobs {
 			keep[h] = struct{}{}
+		}
+		// Keep each built artifact's SBOM closure blobs too, so GC never reclaims a
+		// locally generated SBOM that is still reachable from the current graph.
+		for _, m := range manifests {
+			if refs, found, err := artifact.SBOMClosure(store, artifact.SBOMNamespace(), m); err == nil && found {
+				for _, r := range refs {
+					keep[r.Doc] = struct{}{}
+				}
+			}
 		}
 		l.Info("graph: %d nodes, %d kept blobs", graphResult.Graph.Len(), len(keep))
 	}

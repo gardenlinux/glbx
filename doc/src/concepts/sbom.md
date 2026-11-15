@@ -315,7 +315,7 @@ graph.
 ```json
 {
   "type": "LifecycleScopedRelationship",
-  "spdxId": "urn:spdx:gardenlinux.io/glbx/sboms/d74839e2f86a843b23ec6f27a390aba02277ea5cf798c393e64e5f18435d0f82/relationships/a4cb89f83994be65a8354ab0008778b88cb1d277e27ddfe1f02d9884686bcbe2",
+  "spdxId": "urn:spdx:gardenlinux.io/glbx/sboms/d74839e2f86a843b23ec6f27a390aba02277ea5cf798c393e64e5f18435d0f82/relationships/ca6ffbe3f7b585e023d56f27cba80cff7cb66d90faa3079a8551bb19fa892465",
   "relationshipType": "hasInput",
   "scope": "build",
   "from": "urn:spdx:gardenlinux.io/glbx/sboms/d74839e2f86a843b23ec6f27a390aba02277ea5cf798c393e64e5f18435d0f82/artifact-build",
@@ -328,11 +328,11 @@ graph.
 
 To follow such a reference offline, a reader opens the sibling file named by
 `locationHint`, checks its bytes against the `software_File` checksum, and finds
-the exact `externalSpdxId` in the producer's graph. Here `a31495…` is the
-validation output-manifest hash and `b8f87e…` is the source-build
+the exact `externalSpdxId` in the producer's graph. Here `d74839…` is the
+validation output-manifest hash and `235356…` is the source-build
 output-manifest hash — which is why the exported producer file begins with
-`b8f87e…`, its bytes hash to `c82446…`, and the package entry inside carries the
-separate `fixture.deb` archive checksum `2df848…`.
+`235356…`, its bytes hash to `f7c4d4…`, and the package entry inside carries the
+separate `fixture.deb` archive checksum `b03beb…`.
 
 The same import rule applies to every foreign reference, including a foreign
 `from` on a `copiedTo` relationship. Every producer document in a closure uses the
@@ -371,20 +371,22 @@ packages. For example, `gcc` from `build-deps.yml` becomes
 ```json
 {
   "type": "software_Package",
-  "spdxId": "urn:spdx:gardenlinux.io/glbx/sboms/<M>/inputs/deb/gcc/<version>/<arch>/<sha256>",
+  "spdxId": "urn:spdx:gardenlinux.io/glbx/sboms/<M>/inputs/deb/gcc/4%3A16.1.0-3/arm64/67597a51b7b04601ec7c1aa30a50d4aeca9feb80886e3e108c268b539a1adde0",
   "name": "gcc",
-  "verifiedUsing": [{ "type": "Hash", "algorithm": "sha256", "hashValue": "<sha256>" }],
+  "verifiedUsing": [{ "type": "Hash", "algorithm": "sha256", "hashValue": "67597a51b7b04601ec7c1aa30a50d4aeca9feb80886e3e108c268b539a1adde0" }],
   "creationInfo": "urn:spdx:gardenlinux.io/glbx/sboms/<M>/creation",
-  "software_packageUrl": "pkg:deb/debian/gcc@<version>?arch=<arch>",
-  "software_packageVersion": "<version>"
+  "software_packageUrl": "pkg:deb/debian/gcc@4:16.1.0-3?arch=arm64",
+  "software_packageVersion": "4:16.1.0-3"
 }
 ```
 
 with an `environment/build-container-rootfs → contains → gcc` relationship
-pointing at that element. A tool that is itself locally built (an entry satisfied
-by an artifact `Depends` rather than the lockfile) is not minted here — the
-container instead `contains` the producing build's own `.deb` output element,
-imported under that producer's manifest, as the materials table above describes.
+pointing at that element. (The version's Debian epoch `4:` is URL-encoded to
+`4%3A` in the ID path segment but kept verbatim in the PURL.) A tool that is
+itself locally built (an entry satisfied by an artifact `Depends` rather than the
+lockfile) is not minted here — the container instead `contains` the producing
+build's own `.deb` output element, imported under that producer's manifest, as
+the materials table above describes.
 
 For a quilt package the logical Debian source `contains` the orig archive(s) and
 the packaging Git reference. In glbf-staging, OpenSSL's orig archive supplies the

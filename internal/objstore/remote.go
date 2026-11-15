@@ -27,6 +27,13 @@ const (
 	ociManifestType = "application/vnd.oci.image.manifest.v1+json"
 	ociEmptyType    = "application/vnd.oci.empty.v1+json"
 	ociLayerType    = "application/vnd.oci.image.layer.v1.tar"
+	// sbomClosureArtifactType marks the sbom-<M> manifest that aggregates an SPDX
+	// import closure, and spdxMediaType is the media type of each SPDX document
+	// layer within it. An ORAS pull of the tag writes one file per layer, named by
+	// its title annotation.
+	sbomClosureArtifactType = "application/vnd.gardenlinux.glbx.sbom-closure"
+	spdxMediaType           = "application/spdx+json"
+	ociTitleAnnotation      = "org.opencontainers.image.title"
 )
 
 // ociEmptyConfig is the shared empty config descriptor every one-layer manifest
@@ -52,17 +59,20 @@ func isNotExist(err error) bool {
 
 // descriptor is an OCI content descriptor: a media type, a digest, and a size.
 type descriptor struct {
-	MediaType string `json:"mediaType"`
-	Digest    string `json:"digest"`
-	Size      int64  `json:"size"`
+	MediaType   string            `json:"mediaType"`
+	Digest      string            `json:"digest"`
+	Size        int64             `json:"size"`
+	Annotations map[string]string `json:"annotations,omitempty"`
 }
 
 // manifest is a minimal OCI image manifest. A stored blob is wrapped in one of
 // these — the shared empty config and a single layer naming the blob — so a tag
-// has a manifest to root and the registry keeps the blob reachable.
+// has a manifest to root and the registry keeps the blob reachable. The SBOM
+// closure manifest reuses the same struct with many layers and an artifactType.
 type manifest struct {
 	SchemaVersion int          `json:"schemaVersion"`
 	MediaType     string       `json:"mediaType"`
+	ArtifactType  string       `json:"artifactType,omitempty"`
 	Config        descriptor   `json:"config"`
 	Layers        []descriptor `json:"layers"`
 }
@@ -88,6 +98,42 @@ func oneLayerManifest(blob Hash, size int64) manifest {
 // body.
 func blobTag(h Hash) string { return "blob-" + h.String() }
 func mapTag(id Hash) string { return "map-" + id.String() }
+
+// sbomClosureTag is the public ORAS-pullable tag aggregating an SPDX import
+// closure for output-manifest hash M.
+func sbomClosureTag(m Hash) string { return "sbom-" + m.String() }
+
+// SBOMClosureLayer is one SPDX document in a closure manifest: the document blob
+// hash D, its byte size, and the output-manifest hash N it describes (which names
+// the file an ORAS pull writes, "<N>.spdx.json").
+type SBOMClosureLayer struct {
+	Doc      Hash
+	Size     int64
+	Manifest Hash
+}
+
+// closureManifest builds the sbom-<M> aggregate manifest: the shared empty
+// config and one application/spdx+json layer per closure document, each titled
+// "<N>.spdx.json" so an ORAS pull materializes the flat set of SPDX files. Layers
+// are emitted in the order given (root first, then sorted producers).
+func closureManifest(layers []SBOMClosureLayer) manifest {
+	descs := make([]descriptor, len(layers))
+	for i, l := range layers {
+		descs[i] = descriptor{
+			MediaType:   spdxMediaType,
+			Digest:      "sha256:" + l.Doc.String(),
+			Size:        l.Size,
+			Annotations: map[string]string{ociTitleAnnotation: l.Manifest.String() + ".spdx.json"},
+		}
+	}
+	return manifest{
+		SchemaVersion: 2,
+		MediaType:     ociManifestType,
+		ArtifactType:  sbomClosureArtifactType,
+		Config:        ociEmptyConfig,
+		Layers:        descs,
+	}
+}
 
 // ociRegistry is a client for one repository on an OCI registry. It speaks the
 // handful of distribution-spec routes the store needs: blob existence, blob

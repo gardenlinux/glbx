@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 
 	"github.com/gardenlinux/glbx/internal/objstore"
@@ -132,4 +133,137 @@ func (e *Engine) storeSBOM(ctx context.Context, a Artifact, identity, manifestHa
 		return fmt.Errorf("record sbom map entry: %w", err)
 	}
 	return nil
+}
+
+// SBOMRef is one SBOM document in a closure: the artifact's output-manifest hash
+// M it describes, the SBOM map key K(A,M) it is stored under, and the document
+// blob hash D (the map value). D is the content hash of the serialized SPDX
+// document, i.e. its object-store blob and its OCI blob digest.
+type SBOMRef struct {
+	Manifest objstore.Hash // M
+	MapKey   objstore.Hash // K(A, M)
+	Doc      objstore.Hash // D
+}
+
+// SBOMClosure resolves the transitive SPDX import closure of one artifact's SBOM
+// within a namespace, starting from output-manifest hash M. It returns the root's
+// SBOMRef first, followed by every producer SBOM reachable through
+// SpdxDocument.import edges, deduplicated, in deterministic (root-first, then
+// manifest-hash-sorted) order.
+//
+// Each document is read from the local store via its SBOM map entry; a manifest
+// whose SBOM is absent locally yields found=false with no error, so a caller can
+// skip an artifact that was built before SBOMs or whose generation was skipped.
+// The import graph is acyclic by construction (each consumer pins its producers'
+// document bytes), but a seen-set guards against a malformed cycle regardless.
+func SBOMClosure(store *objstore.Store, namespace string, m objstore.Hash) (refs []SBOMRef, found bool, err error) {
+	root, ok, err := resolveSBOMRef(store, namespace, m)
+	if err != nil || !ok {
+		return nil, false, err
+	}
+
+	seen := map[string]bool{m.String(): true}
+	refs = []SBOMRef{root}
+
+	// Breadth-first over import edges; collect producers in a stable order.
+	queue := []SBOMRef{root}
+	var producers []SBOMRef
+	for len(queue) > 0 {
+		cur := queue[0]
+		queue = queue[1:]
+		imports, err := parseSBOMImports(store, cur.Doc)
+		if err != nil {
+			return nil, false, fmt.Errorf("parse imports of sbom %s: %w", cur.Manifest, err)
+		}
+		for _, n := range imports {
+			if seen[n.String()] {
+				continue
+			}
+			seen[n.String()] = true
+			ref, ok, err := resolveSBOMRef(store, namespace, n)
+			if err != nil {
+				return nil, false, err
+			}
+			if !ok {
+				return nil, false, fmt.Errorf("sbom closure of %s references producer %s whose sbom is missing locally", m, n)
+			}
+			producers = append(producers, ref)
+			queue = append(queue, ref)
+		}
+	}
+
+	sort.Slice(producers, func(i, j int) bool {
+		return producers[i].Manifest.String() < producers[j].Manifest.String()
+	})
+	return append(refs, producers...), true, nil
+}
+
+// resolveSBOMRef resolves M -> K(A,M) -> D for one manifest hash. found=false
+// (no error) means the SBOM is absent from the local store.
+func resolveSBOMRef(store *objstore.Store, namespace string, m objstore.Hash) (SBOMRef, bool, error) {
+	key := sbomMapKey(namespace, m)
+	doc, err := store.Map.Get(key)
+	if err != nil {
+		return SBOMRef{}, false, nil
+	}
+	return SBOMRef{Manifest: m, MapKey: key, Doc: doc}, true, nil
+}
+
+// parseSBOMImports reads one SPDX document blob and returns the producer
+// output-manifest hashes named by its SpdxDocument.import ExternalMap entries.
+func parseSBOMImports(store *objstore.Store, docHash objstore.Hash) ([]objstore.Hash, error) {
+	r, err := store.Blobs.Open(docHash)
+	if err != nil {
+		return nil, err
+	}
+	defer r.Close()
+
+	var parsed struct {
+		Graph []struct {
+			Type   string `json:"type"`
+			Import []struct {
+				ExternalSpdxID string `json:"externalSpdxId"`
+			} `json:"import"`
+		} `json:"@graph"`
+	}
+	if err := json.NewDecoder(r).Decode(&parsed); err != nil {
+		return nil, err
+	}
+
+	seen := map[string]bool{}
+	var out []objstore.Hash
+	for _, el := range parsed.Graph {
+		if el.Type != "SpdxDocument" {
+			continue
+		}
+		for _, im := range el.Import {
+			n, ok := manifestFromSPDXID(im.ExternalSpdxID)
+			if !ok || seen[n.String()] {
+				continue
+			}
+			seen[n.String()] = true
+			out = append(out, n)
+		}
+	}
+	return out, nil
+}
+
+// manifestFromSPDXID extracts the output-manifest hash N from an SPDX element ID
+// of the form "urn:spdx:<A>/glbx/sboms/<N>/<path>".
+func manifestFromSPDXID(id string) (objstore.Hash, bool) {
+	const marker = "/glbx/sboms/"
+	i := strings.Index(id, marker)
+	if i < 0 {
+		return objstore.Hash{}, false
+	}
+	rest := id[i+len(marker):]
+	j := strings.Index(rest, "/")
+	if j < 0 {
+		return objstore.Hash{}, false
+	}
+	h, err := objstore.NewHash(rest[:j])
+	if err != nil {
+		return objstore.Hash{}, false
+	}
+	return h, true
 }
