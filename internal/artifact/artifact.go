@@ -19,7 +19,7 @@ import (
 // A per-artifact-type change does not touch this; each type carries its own
 // seed. $GLBX_ID_SEED_OVERRIDE replaces it at runtime to get an independent
 // cache namespace without editing the source.
-const idSeed = "133b031920afb33510296ee689345c52"
+const idSeed = "2dd28490504fd57080420662dc541d24"
 
 // IDSeed returns the global identity seed, honoring $GLBX_ID_SEED_OVERRIDE. It
 // is the first element every artifact type folds into its identity.
@@ -56,6 +56,23 @@ type BuildContext struct {
 	Inputs map[string]objstore.Hash
 }
 
+// SBOMContext is passed to an artifact's SBOM() method after its Build has run
+// and its manifest has been stored. It carries everything a writer needs that is
+// not already on the artifact itself: the store (for resolving dependency
+// manifests and reading blobs), the artifact's own resolved build inputs (the
+// same map Build received), its emitted outputs (including the reserved
+// .glbx-provenance output), its identity, the output-manifest hash the SBOM is
+// keyed on, and the active SBOM namespace.
+type SBOMContext struct {
+	Ctx       context.Context
+	Store     *objstore.Store
+	Inputs    map[string]objstore.Hash
+	Outputs   []Output
+	Identity  objstore.Hash
+	Manifest  objstore.Hash
+	Namespace string
+}
+
 type Artifact interface {
 	Key() string
 	Identity() (objstore.Hash, error)
@@ -76,9 +93,9 @@ type Artifact interface {
 	// artifact kind produces none (SBOMs are optional per kind, not a forced
 	// requirement). The engine writes the returned bytes to the store after the
 	// manifest, keyed by the output-manifest hash and the active SBOM namespace.
-	// Scaffolding stage: implementations return a tiny placeholder; real SPDX
-	// generation comes later.
-	SBOM(ctx context.Context) ([]byte, error)
+	// It is called with an SBOMContext carrying the store, resolved inputs,
+	// emitted outputs, identity, manifest hash, and namespace.
+	SBOM(sctx SBOMContext) ([]byte, error)
 	// OutputRefs returns the blob references for an artifact that has already
 	// been built, without building. manifest is the hash of the map's target
 	// blob (the local manifest / entrypoint); leaves are the output blobs it

@@ -479,7 +479,7 @@ func (e *Engine) buildNode(ctx context.Context, n *node) BuildResult {
 	// Write the artifact's SBOM document and its map entry to the local store,
 	// keyed by the output-manifest hash and the active SBOM namespace. A failure
 	// here fails the build loudly — this is scaffolding we want to notice breaking.
-	if err := e.storeSBOM(ctx, n.artifact, manifestHash); err != nil {
+	if err := e.storeSBOM(ctx, n.artifact, identity, manifestHash, resolvedInputs, outputs); err != nil {
 		return fail(fmt.Errorf("store sbom: %w", err))
 	}
 

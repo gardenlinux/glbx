@@ -58,7 +58,7 @@ func (m *mockArtifact) Build(ctx BuildContext) ([]Output, error) {
 
 // SBOM returns the configured placeholder bytes, or nil when unset (the latter
 // exercises the "no SBOM for this kind" path in the engine).
-func (m *mockArtifact) SBOM(ctx context.Context) ([]byte, error) {
+func (m *mockArtifact) SBOM(sctx SBOMContext) ([]byte, error) {
 	return m.sbom, nil
 }
 

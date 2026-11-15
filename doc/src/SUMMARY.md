@@ -29,6 +29,7 @@
 - [The execution environment](./impl/exec-env.md)
 - [The artifact engine](./impl/engine.md)
 - [Package build and image assembly](./impl/build.md)
+- [SBOM generation](./impl/sbom.md)
 - [Out-of-container signing](./impl/signing.md)
 - [Reproducible image helpers](./impl/image-helpers.md)
 - [Command-line interface](./impl/cli.md)

@@ -106,8 +106,17 @@ func withProvenance(outputs []Output, identity objstore.Hash, targetKey string, 
 // nil) is a no-op. The map key is folded from the SBOM seed, the active namespace,
 // and the artifact's output-manifest hash. Local store only — publication of the
 // SBOM to a remote is a separate step not wired here.
-func (e *Engine) storeSBOM(ctx context.Context, a Artifact, manifestHash objstore.Hash) error {
-	doc, err := a.SBOM(ctx)
+func (e *Engine) storeSBOM(ctx context.Context, a Artifact, identity, manifestHash objstore.Hash, inputs map[string]objstore.Hash, outputs []Output) error {
+	sctx := SBOMContext{
+		Ctx:       ctx,
+		Store:     e.store,
+		Inputs:    inputs,
+		Outputs:   outputs,
+		Identity:  identity,
+		Manifest:  manifestHash,
+		Namespace: SBOMNamespace(),
+	}
+	doc, err := a.SBOM(sctx)
 	if err != nil {
 		return fmt.Errorf("generate sbom: %w", err)
 	}
@@ -118,7 +127,7 @@ func (e *Engine) storeSBOM(ctx context.Context, a Artifact, manifestHash objstor
 	if err != nil {
 		return fmt.Errorf("store sbom blob: %w", err)
 	}
-	key := sbomMapKey(SBOMNamespace(), manifestHash)
+	key := sbomMapKey(sctx.Namespace, manifestHash)
 	if err := e.store.Map.Set(key, blobHash, false); err != nil {
 		return fmt.Errorf("record sbom map entry: %w", err)
 	}
