@@ -56,7 +56,14 @@ RUN curl -fsSL "https://go.dev/dl/go${GO_VERSION}.linux-$(dpkg --print-architect
 
 RUN go install "google.golang.org/protobuf/cmd/protoc-gen-go@${PROTOC_GEN_GO_VERSION}"
 
-RUN curl -fsSL https://sh.rustup.rs | sh -s -- -y --no-modify-path --profile minimal \
- && cargo install "mdbook@${MDBOOK_VERSION}" "mdbook-mermaid@${MDBOOK_MERMAID_VERSION}"
+# Rust + mdbook are only needed to build the documentation (`make doc`). Compiling
+# them from source dominates the image build, so NODOC=1 skips this layer for
+# callers that never build the docs (e.g. the glbf-staging CI, which only needs
+# `make cross`).
+ARG NODOC=0
+RUN if [ "$NODOC" != "1" ]; then \
+        curl -fsSL https://sh.rustup.rs | sh -s -- -y --no-modify-path --profile minimal \
+     && cargo install "mdbook@${MDBOOK_VERSION}" "mdbook-mermaid@${MDBOOK_MERMAID_VERSION}"; \
+    fi
 
 RUN git config --global --add safe.directory /home/dev/workspace

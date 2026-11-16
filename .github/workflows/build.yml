@@ -22,6 +22,28 @@ jobs:
       - name: Allow unprivileged user namespaces
         run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
 
+      - name: Install qemu-user-static to allow building multi arch containers
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends qemu-user-binfmt
+
+      - name: Configure subordinate UID/GID ranges
+        run: |
+          user="$(id -un)"
+
+          start=$(awk -F: '
+            NF == 3 {
+              end = $2 + $3
+              if (end > max) max = end
+            }
+            END { print int((max + 99999) / 100000) * 100000 }
+          ' /etc/subuid /etc/subgid)
+
+          sudo sed -i "/^${user}:/d" /etc/subuid /etc/subgid
+          echo "${user}:${start}:1000000" | sudo tee -a /etc/subuid /etc/subgid
+
+          podman system migrate
+
       - name: Build devcontainer
         run: podman build -t glbx-dev .devcontainer
 
