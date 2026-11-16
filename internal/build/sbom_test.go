@@ -366,3 +366,100 @@ func TestSBOMImageContainsIncludedImage(t *testing.T) {
 		t.Errorf("disk image does not contain included initrd image %s; rels=%v", initrdImgURI, dg.relationships())
 	}
 }
+
+// storeManifestOnly writes an artifact's identity→manifest map entry (as a cache
+// hit / cross-namespace pull would leave it) WITHOUT storing its SBOM document or
+// SBOM map entry. It returns the output-manifest hash. A consumer SBOM that imports
+// this producer must then resolve the manifest but find no document checksum.
+func storeManifestOnly(t *testing.T, store *objstore.Store, a artifact.Artifact, outputs []artifact.Output) objstore.Hash {
+	t.Helper()
+	identity, err := a.Identity()
+	if err != nil {
+		t.Fatalf("%s identity: %v", a.Key(), err)
+	}
+	manifestHash := storeSerializedManifest(t, store, outputs)
+	if err := store.Map.Set(identity, manifestHash, false); err != nil {
+		t.Fatalf("set manifest map: %v", err)
+	}
+	return manifestHash
+}
+
+// TestSBOMImportUndefinedWhenProducerSBOMMissing covers the cache-hit / cross-
+// namespace case: the producer's manifest resolves but its SBOM document is not in
+// the local store under this namespace. The consumer SBOM must still build; the
+// cross-document reference must survive as an ExternalMap with the foreign URN, no
+// defining-file element, no definingArtifact/locationHint, and an unavailable
+// comment; and every structural edge to the foreign element must be unchanged.
+func TestSBOMImportUndefinedWhenProducerSBOMMissing(t *testing.T) {
+	store := newStore(t)
+	root := t.TempDir()
+	srcDir := filepath.Join(root, "pkgs", "glibc")
+	writeSourcePkg(t, srcDir, "Source: glibc\nPackage: libc6\n", "")
+
+	src := NewDebianPkgBuild(DebianPkgBuildConfig{Name: "glibc", PkgDir: srcDir, Arch: "amd64", Store: store})
+	bin := src.Binary("libc6")
+	bin.depsResolved = true
+
+	debBlob, _ := store.Blobs.Store(strings.NewReader("libc6 deb"))
+	ctlBlob := storeControl(t, store, "Package: libc6\nVersion: 2.40-1\nArchitecture: amd64\n")
+	srcOuts := []artifact.Output{{Name: "libc6.deb", Hash: debBlob}, {Name: "control:libc6", Hash: ctlBlob}}
+	// Give the binary validation byte-distinct outputs so its output-manifest hash
+	// differs from the source build's: the test helpers do not fold provenance, so
+	// identical outputs would collide on one shared SBOM map key and the source's
+	// stored SBOM would masquerade as the binary's.
+	binDebBlob, _ := store.Blobs.Store(strings.NewReader("libc6 deb (binary validation re-emit)"))
+	binOuts := []artifact.Output{{Name: "libc6.deb", Hash: binDebBlob}, {Name: "control:libc6", Hash: ctlBlob}}
+	// Source build gets a full SBOM; the binary validation gets ONLY a manifest, as
+	// if it were pulled from cache (or built under a different namespace).
+	storeManifestAndSBOM(t, store, src, srcOuts, nil)
+	binManifest := storeManifestOnly(t, store, bin, binOuts)
+
+	rootfs := newRootfsDirect("base", "amd64", []*debianBinaryPkg{bin}, store)
+	rootfsTar, _ := store.Blobs.Store(strings.NewReader("rootfs tar bytes"))
+	rootfsOuts := []artifact.Output{{Name: "rootfs.tar.gz", Hash: rootfsTar}}
+	rootfsInputs := map[string]objstore.Hash{"libc6.deb": binDebBlob, "control:libc6": ctlBlob}
+
+	// The rootfs SBOM must generate without error despite the missing producer SBOM.
+	_, rfsDoc := storeManifestAndSBOM(t, store, rootfs, rootfsOuts, rootfsInputs)
+	rg := parseSPDX(t, rfsDoc)
+
+	binDebURI := "urn:spdx:localhost/glbx/sboms/" + binManifest.String() + "/outputs/libc6.deb"
+
+	// The ExternalMap for the foreign element must still exist, but be marked
+	// undefined: foreign URN present; no definingArtifact; no locationHint; a comment.
+	var im map[string]any
+	for _, m := range rg.importMaps() {
+		if m["externalSpdxId"] == binDebURI {
+			im = m
+			break
+		}
+	}
+	if im == nil {
+		t.Fatalf("rootfs doc dropped the import of %s; imports=%v", binDebURI, rg.importMaps())
+	}
+	if _, ok := im["definingArtifact"]; ok {
+		t.Errorf("undefined import must not carry definingArtifact: %v", im)
+	}
+	if _, ok := im["locationHint"]; ok {
+		t.Errorf("undefined import must not carry locationHint: %v", im)
+	}
+	if c, _ := im["comment"].(string); !strings.Contains(c, "unavailable") {
+		t.Errorf("undefined import comment = %q, want it to mention unavailable", c)
+	}
+
+	// No documents/<binManifest> defining-file element may exist (nothing to pin).
+	defURI := "urn:spdx:localhost/glbx/sboms/" + rg.resultManifest(t) + "/documents/" + binManifest.String()
+	if rg.ids()[defURI] {
+		t.Errorf("undefined import must not emit a defining-file element %s", defURI)
+	}
+
+	// Structural edges to the foreign element are unchanged.
+	payload := "urn:spdx:localhost/glbx/sboms/" + rg.resultManifest(t) + "/payload"
+	if !rg.hasRel(payload, "contains", binDebURI) {
+		t.Errorf("rootfs payload must still contain %s; rels=%v", binDebURI, rg.relationships())
+	}
+	build := "urn:spdx:localhost/glbx/sboms/" + rg.resultManifest(t) + "/artifact-build"
+	if !rg.hasRel(build, "hasInput", binDebURI) {
+		t.Errorf("rootfs build must still have hasInput -> %s", binDebURI)
+	}
+}

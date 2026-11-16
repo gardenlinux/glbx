@@ -31,11 +31,11 @@ func (im *Image) SBOM(sctx artifact.SBOMContext) ([]byte, error) {
 
 	// Rootfs input: import the rootfs producer's payload and record it as an input.
 	// The delivered image carries that filesystem, so the image output contains it.
-	rootfsManifest, rootfsDoc, err := producerManifest(im.rootfs, store, sctx.Namespace)
+	rootfsManifest, rootfsDoc, rootfsFound, err := producerManifest(im.rootfs, store, sctx.Namespace)
 	if err != nil {
 		return nil, err
 	}
-	rootfsPayload := d.importElement(rootfsManifest, "payload", rootfsDoc)
+	rootfsPayload := d.importElement(rootfsManifest, "payload", rootfsDoc, rootfsFound)
 	d.relate(build, "hasInput", rootfsPayload, "build")
 	d.relate(imgID, "contains", rootfsPayload, "")
 
@@ -52,11 +52,11 @@ func (im *Image) SBOM(sctx artifact.SBOMContext) ([]byte, error) {
 	}
 	sort.Slice(imgDeps, func(i, j int) bool { return imgDeps[i].Key() < imgDeps[j].Key() })
 	for _, dep := range imgDeps {
-		pm, dc, err := producerManifest(dep, store, sctx.Namespace)
+		pm, dc, found, err := producerManifest(dep, store, sctx.Namespace)
 		if err != nil {
 			return nil, err
 		}
-		elem := d.importElement(pm, "outputs/"+segEscape(imageOutputName), dc)
+		elem := d.importElement(pm, "outputs/"+segEscape(imageOutputName), dc, found)
 		d.relate(build, "hasInput", elem, "build")
 		d.relate(imgID, "contains", elem, "")
 	}
@@ -110,11 +110,11 @@ func (im *Image) SBOM(sctx artifact.SBOMContext) ([]byte, error) {
 	local := append([]localToolingRef(nil), im.local...)
 	sort.Slice(local, func(i, j int) bool { return local[i].output < local[j].output })
 	for _, l := range local {
-		pm, dc, err := producerManifest(l.build, store, sctx.Namespace)
+		pm, dc, found, err := producerManifest(l.build, store, sctx.Namespace)
 		if err != nil {
 			return nil, err
 		}
-		elem := d.importElement(pm, "outputs/"+segEscape(l.output), dc)
+		elem := d.importElement(pm, "outputs/"+segEscape(l.output), dc, found)
 		d.relate(assemblyEnv, "contains", elem, "")
 	}
 

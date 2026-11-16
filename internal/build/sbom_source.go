@@ -136,11 +136,11 @@ func writeSourceBuildSBOM(sb sourceBuildSBOM, sctx artifact.SBOMContext) ([]byte
 	for _, pkg := range chrootPkgs {
 		var toolID string
 		if dep, ok := localByName[pkg.Name]; ok {
-			pm, dc, err := producerManifest(dep.producer, store, sctx.Namespace)
+			pm, dc, found, err := producerManifest(dep.producer, store, sctx.Namespace)
 			if err != nil {
 				return nil, err
 			}
-			toolID = d.importElement(pm, "outputs/"+segEscape(dep.debName), dc)
+			toolID = d.importElement(pm, "outputs/"+segEscape(dep.debName), dc, found)
 		} else {
 			sha, _ := objstore.NewHash(pkg.SHA256)
 			path := fmt.Sprintf("inputs/deb/%s/%s/%s/%s", segEscape(pkg.Name), segEscape(pkg.Version), segEscape(pkg.Architecture), pkg.SHA256)

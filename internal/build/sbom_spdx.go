@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/url"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/gardenlinux/glbx/internal/artifact"
@@ -327,9 +328,26 @@ func (d *spdxDoc) relate(from, relType, to, scope string) {
 //   - returns the foreign element's full ID so the caller can target it in edges.
 //
 // The foreign ID is NOT added to the local element list.
-func (d *spdxDoc) importElement(producer objstore.Hash, path string, docChecksum objstore.Hash) string {
+//
+// found=false means the producer's SPDX document checksum is undefined (its SBOM is
+// not resolvable in this namespace — pulled from cache without its map entry, or
+// living only under another namespace). docChecksum is ignored. The foreign element
+// URN is a pure function of (namespace, N, path) and is still minted, so every edge
+// wires unchanged; only the byte pin is dropped: no documents/<N> defining-file
+// element is emitted, and the ExternalMap carries neither definingArtifact nor
+// locationHint but a comment marking the document unavailable.
+func (d *spdxDoc) importElement(producer objstore.Hash, path string, docChecksum objstore.Hash, found bool) string {
 	foreign := d.foreignID(producer, path)
 	d.foreignIDs[foreign] = true
+
+	if !found {
+		d.externalMaps = append(d.externalMaps, map[string]any{
+			"type":           "ExternalMap",
+			"externalSpdxId": foreign,
+			"comment":        "glbx: referenced SBOM document unavailable in namespace " + strconv.Quote(d.namespace) + "; document checksum undefined",
+		})
+		return foreign
+	}
 
 	defID, ok := d.importDocs[producer.String()]
 	if !ok {
@@ -455,17 +473,24 @@ func purl(vendor, name, version, arch string) string {
 
 // producerManifest resolves a dependency artifact's output-manifest hash and the
 // checksum of its SPDX document in this namespace, for cross-document imports. It
-// returns the manifest hash N and the SPDX document checksum D. D is needed to pin
-// the producer document; it is the blob the producer's SBOM map entry points at.
-func producerManifest(a artifact.Artifact, store *objstore.Store, namespace string) (manifest, docChecksum objstore.Hash, err error) {
+// returns the manifest hash N, the SPDX document checksum D, and found. D is needed
+// to pin the producer document; it is the blob the producer's SBOM map entry points
+// at.
+//
+// found=false (D undefined, no error) means the producer's SBOM is not resolvable
+// in this namespace: it was pulled from the cache without its SBOM map entry, or it
+// only exists under a different namespace. The manifest hash N is still returned so
+// the caller can mint the foreign element URN; only the document checksum is absent.
+// A hard error is returned only when the producer has no output manifest at all.
+func producerManifest(a artifact.Artifact, store *objstore.Store, namespace string) (manifest, docChecksum objstore.Hash, found bool, err error) {
 	m, _, err := a.OutputRefs(store)
 	if err != nil {
-		return objstore.Hash{}, objstore.Hash{}, fmt.Errorf("%s output refs: %w", a.Key(), err)
+		return objstore.Hash{}, objstore.Hash{}, false, fmt.Errorf("%s output refs: %w", a.Key(), err)
 	}
 	key := artifact.SBOMMapKey(namespace, m)
 	dc, err := store.Map.Get(key)
 	if err != nil {
-		return objstore.Hash{}, objstore.Hash{}, fmt.Errorf("%s sbom not found (key %s): %w", a.Key(), key, err)
+		return m, objstore.Hash{}, false, nil
 	}
-	return m, dc, nil
+	return m, dc, true, nil
 }

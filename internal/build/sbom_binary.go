@@ -23,12 +23,12 @@ func (b *debianBinaryPkg) SBOM(sctx artifact.SBOMContext) ([]byte, error) {
 
 	// Import the source build's selected .deb and control, and record them as build
 	// inputs. The producer element URIs are minted identically on both sides.
-	srcManifest, srcDoc, err := producerManifest(b.sourceBuild, store, sctx.Namespace)
+	srcManifest, srcDoc, srcFound, err := producerManifest(b.sourceBuild, store, sctx.Namespace)
 	if err != nil {
 		return nil, err
 	}
-	srcDebElem := d.importElement(srcManifest, "outputs/"+segEscape(b.name+".deb"), srcDoc)
-	srcCtlElem := d.importElement(srcManifest, "outputs/"+segEscape("control:"+b.name), srcDoc)
+	srcDebElem := d.importElement(srcManifest, "outputs/"+segEscape(b.name+".deb"), srcDoc, srcFound)
+	srcCtlElem := d.importElement(srcManifest, "outputs/"+segEscape("control:"+b.name), srcDoc, srcFound)
 	d.relate(build, "hasInput", srcDebElem, "build")
 	d.relate(build, "hasInput", srcCtlElem, "build")
 

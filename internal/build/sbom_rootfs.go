@@ -69,11 +69,11 @@ func (r *Rootfs) SBOM(sctx artifact.SBOMContext) ([]byte, error) {
 			// skip rather than mint a bogus reference.
 			continue
 		}
-		pm, dc, err := producerManifest(bp, store, sctx.Namespace)
+		pm, dc, found, err := producerManifest(bp, store, sctx.Namespace)
 		if err != nil {
 			return nil, err
 		}
-		elem := d.importElement(pm, "outputs/"+segEscape(bp.name+".deb"), dc)
+		elem := d.importElement(pm, "outputs/"+segEscape(bp.name+".deb"), dc, found)
 		d.relate(payload, "contains", elem, "")
 		d.relate(build, "hasInput", elem, "build")
 	}
