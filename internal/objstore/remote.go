@@ -142,9 +142,12 @@ type ociRegistry struct {
 	base   *url.URL // scheme://host/v2/<repo>
 	client *http.Client
 
-	// user and pass are the registry credentials used to redeem a bearer token
-	// against a 401 challenge. Empty means no authentication is attempted, which
-	// is correct for an anonymous or local test registry.
+	// user and pass are the registry credentials redeemed for a bearer token
+	// against a 401 Bearer challenge: pass is the secret presented as HTTP basic
+	// auth to the challenge's token endpoint (despite the GLBX_REGISTRY_TOKEN
+	// name, it is not itself a bearer token). When both are empty the token is
+	// requested anonymously, which is how a public registry serves its pulls; a
+	// registry that issues no anonymous token leaves the request a 401.
 	user string
 	pass string
 
@@ -196,8 +199,8 @@ func (r *ociRegistry) urlf(suffix string) string {
 // 401 Bearer challenge and retrying once. body, when non-nil, is the request
 // payload: it is passed explicitly so the request can be rebuilt for the retry
 // (an http.Request body is single-use). headers set on the first request are
-// reapplied to the retry. With no credentials configured do simply issues the
-// request, so an anonymous or local registry behaves exactly as before.
+// reapplied to the retry. A 401 that carries no Bearer challenge is returned
+// unchanged, so a non-Bearer registry behaves exactly as before.
 func (r *ociRegistry) do(method, url string, body []byte, headers map[string]string) (*http.Response, error) {
 	send := func() (*http.Response, error) {
 		var rdr io.Reader
@@ -227,9 +230,11 @@ func (r *ociRegistry) do(method, url string, body []byte, headers map[string]str
 	if err != nil {
 		return nil, err
 	}
-	// Redeem a token against a Bearer challenge and retry once. Only attempt it
-	// when credentials are configured and we have not already sent a token.
-	if resp.StatusCode == http.StatusUnauthorized && r.pass != "" {
+	// Redeem a token against a Bearer challenge and retry once. Redemption is
+	// attempted for every 401 carrying a realm — anonymously when no credentials
+	// are configured (a public pull), with basic auth otherwise. A challenge
+	// without a realm, or a second 401 after the retry, surfaces to the caller.
+	if resp.StatusCode == http.StatusUnauthorized {
 		challenge := resp.Header.Get("WWW-Authenticate")
 		resp.Body.Close()
 		if err := r.authenticate(challenge); err != nil {
@@ -241,8 +246,10 @@ func (r *ociRegistry) do(method, url string, body []byte, headers map[string]str
 }
 
 // authenticate redeems a bearer token from the realm named in a Bearer
-// WWW-Authenticate challenge, using the configured credentials as HTTP basic
-// auth, and caches it. The challenge looks like:
+// WWW-Authenticate challenge and caches it. When credentials are configured the
+// token endpoint is hit with them as HTTP basic auth; with none it is requested
+// anonymously, which a public registry answers with a pull-scoped token. The
+// challenge looks like:
 //
 //	Bearer realm="https://ghcr.io/token",service="ghcr.io",scope="repository:owner/repo:pull,push"
 func (r *ociRegistry) authenticate(challenge string) error {
@@ -269,7 +276,9 @@ func (r *ociRegistry) authenticate(challenge string) error {
 	if err != nil {
 		return err
 	}
-	req.SetBasicAuth(r.user, r.pass)
+	if r.pass != "" {
+		req.SetBasicAuth(r.user, r.pass)
+	}
 
 	resp, err := r.client.Do(req)
 	if err != nil {

@@ -435,3 +435,102 @@ func TestOCI_BearerAuthWrongCreds(t *testing.T) {
 		t.Error("expected publish to fail with bad credentials")
 	}
 }
+
+// TestOCI_AnonymousAuth exercises the no-credentials path against a public
+// registry: an unauthenticated request draws a Bearer challenge, and the token
+// endpoint issues a pull-scoped token to anyone — no basic-auth header. The
+// client must redeem anonymously and attach the token transparently, so a public
+// pull succeeds without GLBX_REGISTRY_USER / GLBX_REGISTRY_TOKEN being set.
+func TestOCI_AnonymousAuth(t *testing.T) {
+	fake := newFakeOCIRegistry()
+
+	const token = "anon-bearer-token"
+
+	mux := http.NewServeMux()
+	// Token endpoint: issues a token anonymously, and rejects any request that
+	// carries a basic-auth header (so a stray credential can't pass this test).
+	mux.HandleFunc("/token", func(w http.ResponseWriter, r *http.Request) {
+		if _, _, ok := r.BasicAuth(); ok {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"token":"` + token + `"}`))
+	})
+
+	authGate := func(next http.Handler) http.HandlerFunc {
+		return func(w http.ResponseWriter, r *http.Request) {
+			if r.Header.Get("Authorization") != "Bearer "+token {
+				realm := "http://" + r.Host + "/token"
+				w.Header().Set("WWW-Authenticate",
+					`Bearer realm="`+realm+`",service="fake",scope="repository:glbx-test:pull"`)
+				w.WriteHeader(http.StatusUnauthorized)
+				return
+			}
+			next.ServeHTTP(w, r)
+		}
+	}
+	mux.Handle("/v2/", authGate(fake))
+	mux.HandleFunc("/upload/", func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer "+token {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		fake.uploadHandler(w, r)
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+
+	ref := strings.TrimPrefix(srv.URL, "http://") + "/glbx-test"
+	reg, err := parseRegistry("http://"+ref, false)
+	if err != nil {
+		t.Fatalf("parseRegistry: %v", err)
+	}
+	// No credentials: the anonymous path must carry the round-trip on its own.
+	reg.user, reg.pass = "", ""
+
+	content := []byte("public blob")
+	h := HashBytes(content)
+	if err := reg.publishBlob(h, content); err != nil {
+		t.Fatalf("publishBlob through anonymous auth: %v", err)
+	}
+	rb := &remoteBlobs{reg: reg}
+	if !rb.Has(h) {
+		t.Error("published blob should exist")
+	}
+	rc, err := rb.Open(h)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	got, _ := io.ReadAll(rc)
+	rc.Close()
+	if string(got) != string(content) {
+		t.Errorf("blob content %q, want %q", got, content)
+	}
+}
+
+// TestOCI_AnonymousAuthRefused confirms that when no credentials are set and the
+// registry grants no anonymous token (a private repo), the persistent 401
+// surfaces as an error rather than a silent miss.
+func TestOCI_AnonymousAuthRefused(t *testing.T) {
+	mux := http.NewServeMux()
+	// Token endpoint refuses everyone: no anonymous access.
+	mux.HandleFunc("/token", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+	})
+	mux.Handle("/v2/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("WWW-Authenticate",
+			`Bearer realm="http://`+r.Host+`/token",service="fake",scope="repository:glbx-test:pull"`)
+		w.WriteHeader(http.StatusUnauthorized)
+	}))
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+
+	ref := strings.TrimPrefix(srv.URL, "http://") + "/glbx-test"
+	reg, _ := parseRegistry("http://"+ref, false)
+	reg.user, reg.pass = "", ""
+
+	if _, err := reg.getManifest(blobTag(HashBytes([]byte("x")))); err == nil {
+		t.Error("expected a private repo with no anonymous token to surface an error")
+	}
+}
