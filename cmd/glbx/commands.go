@@ -90,6 +90,11 @@ func cmdStatus(args []string) error {
 		return err
 	}
 	l.Info("cache: %s", resolveCacheDir(""))
+	if ref, _ := registryFromEnv(); ref != "" {
+		l.Info("registry: %s", ref)
+	} else {
+		l.Info("registry: none (local only)")
+	}
 	if confRoot := findConfDir(); confRoot != "" {
 		l.Info("working tree: %s", confRoot)
 	} else {
