@@ -1,0 +1,17 @@
+{
+    "name": "glbx-dev",
+    "build": {
+        "dockerfile": "Containerfile"
+    },
+    "remoteUser": "dev",
+    "workspaceFolder": "/home/dev/workspace",
+    "workspaceMount": "source=${localWorkspaceFolder},target=/home/dev/workspace,type=bind",
+    "runArgs": [
+        "--tmpfs", "/tmp",
+        "--security-opt", "unmask=/proc/*",
+        "--security-opt", "seccomp=unconfined",
+        "--security-opt", "label=disable",
+        "--security-opt", "apparmor=unconfined",
+        "--userns", "keep-id:uid=1000,gid=1000"
+    ]
+}

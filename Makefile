@@ -52,10 +52,10 @@ build_demo:
 	@mkdir -p $(BIN_DIR)
 	go build -o $(BIN_DIR)/taskdemo ./cmd/taskdemo
 
-fmt:
+fmt: proto
 	go fmt ./...
 
-vet:
+vet: proto
 	go vet ./...
 
 # Tests consume the pre-built stub via GLBX_EXEC_ENV_STUB; tests that need it

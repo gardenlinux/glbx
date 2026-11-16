@@ -1,0 +1,62 @@
+FROM debian:stable
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends \
+        build-essential \
+        bzip2 \
+        ca-certificates \
+        curl \
+        e2fsprogs \
+        file \
+        git \
+        gnupg \
+        gpgv \
+        libcap2-bin \
+        ovmf \
+        patch \
+        protobuf-compiler \
+        qemu-system-arm \
+        qemu-system-x86 \
+        sudo \
+        uidmap \
+        uuid-runtime \
+        xz-utils \
+        zstd \
+ && apt-get clean \
+ && rm -rf /var/lib/apt/lists/*
+
+RUN chmod -s /usr/bin/newuidmap \
+ && setcap cap_setuid=ep /usr/bin/newuidmap \
+ && chmod -s /usr/bin/newgidmap \
+ && setcap cap_setgid=ep /usr/bin/newgidmap
+
+RUN groupadd -g 1000 dev \
+ && useradd -m -u 1000 -g 1000 -s /bin/bash dev \
+ && echo 'dev ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/dev \
+ && chmod 0440 /etc/sudoers.d/dev \
+ && echo 'dev:100000:65536' >> /etc/subuid \
+ && echo 'dev:100000:65536' >> /etc/subgid
+
+USER dev
+WORKDIR /home/dev/workspace
+
+ENV PATH=/home/dev/go/bin:/home/dev/.local/go/bin:/home/dev/.cargo/bin:/usr/local/bin:/usr/local/sbin:/usr/sbin:/usr/bin:/sbin:/bin
+
+ENV GO_VERSION=1.27.4 \
+    PROTOC_GEN_GO_VERSION=v1.36.12 \
+    MDBOOK_VERSION=0.5.4 \
+    MDBOOK_MERMAID_VERSION=0.17.1
+
+RUN mkdir /home/dev/.local
+
+RUN curl -fsSL "https://go.dev/dl/go${GO_VERSION}.linux-$(dpkg --print-architecture).tar.gz" \
+    | tar -C /home/dev/.local -xz --one-top-level=go --strip-components=1
+
+RUN go install "google.golang.org/protobuf/cmd/protoc-gen-go@${PROTOC_GEN_GO_VERSION}"
+
+RUN curl -fsSL https://sh.rustup.rs | sh -s -- -y --no-modify-path --profile minimal \
+ && cargo install "mdbook@${MDBOOK_VERSION}" "mdbook-mermaid@${MDBOOK_MERMAID_VERSION}"
+
+RUN git config --global --add safe.directory /home/dev/workspace
