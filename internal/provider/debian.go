@@ -2,6 +2,7 @@ package provider
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/gardenlinux/glbx/internal/buildcfg"
 	"github.com/gardenlinux/glbx/internal/debian/aptrepo"
@@ -21,13 +22,15 @@ type debianRepoCfg struct {
 	Repo     string
 	Dist     string
 	Snapshot string
-	Arch     string
 	Cookie   string
 	Keyring  string
 	NoVerify bool
 
 	// Gen* override Repo/Dist/Arch for a provider's control-generation container
-	// (debian-kernel). They default to the resolved Repo/Dist/Arch.
+	// (debian-kernel). GenRepo/GenDist default to the resolved Repo/Dist; GenArch
+	// defaults to the host arch (control generation is architecture-neutral — the
+	// regenerated debian/control is committed to git as a single file — so it runs
+	// natively regardless of which arches the lockfile covers).
 	GenRepo string
 	GenDist string
 	GenArch string
@@ -35,9 +38,10 @@ type debianRepoCfg struct {
 
 // debianParamKeys is the set of parameter keys the Debian-family providers
 // accept. Keys outside this set are rejected so a typo surfaces as an error
-// rather than a silently ignored option.
+// rather than a silently ignored option. Target architecture is NOT a param:
+// lock generation covers the arch set given by `glbx lockfile --architectures`.
 var debianParamKeys = map[string]bool{
-	"repo": true, "dist": true, "snapshot": true, "arch": true,
+	"repo": true, "dist": true, "snapshot": true,
 	"cookie": true, "keyring": true, "no-verify": true,
 	"gen-repo": true, "gen-dist": true, "gen-arch": true,
 }
@@ -56,7 +60,6 @@ func debianRepoConfig(p Params) (debianRepoCfg, error) {
 		Repo:     p["repo"],
 		Dist:     p["dist"],
 		Snapshot: p["snapshot"],
-		Arch:     p["arch"],
 		Cookie:   p["cookie"],
 		Keyring:  p["keyring"],
 		GenRepo:  p["gen-repo"],
@@ -83,9 +86,6 @@ func debianRepoConfig(p Params) (debianRepoCfg, error) {
 	if cfg.Snapshot == "" {
 		cfg.Snapshot = aptrepo.DefaultSnapshotBase
 	}
-	if cfg.Arch == "" {
-		cfg.Arch = buildcfg.HostArch()
-	}
 	if cfg.Keyring == "" {
 		cfg.Keyring = "/usr/share/keyrings/debian-archive-keyring.gpg"
 	}
@@ -96,7 +96,7 @@ func debianRepoConfig(p Params) (debianRepoCfg, error) {
 		cfg.GenDist = cfg.Dist
 	}
 	if cfg.GenArch == "" {
-		cfg.GenArch = cfg.Arch
+		cfg.GenArch = buildcfg.HostArch()
 	}
 	return cfg, nil
 }
@@ -104,8 +104,9 @@ func debianRepoConfig(p Params) (debianRepoCfg, error) {
 const debianLockParamsHelp = `repo      APT repository URL; default https://deb.debian.org/debian
 dist      APT distribution; default testing
 snapshot  snapshot.debian.org file endpoint (SHA1-addressed); default <builtin>
-arch      target architecture; default host arch
-cookie    reuse a cached InRelease within a session`
+cookie    reuse a cached InRelease within a session
+
+(target architectures are chosen with the top-level --architectures flag, not a param)`
 
 // debianLock is the plain Debian lock generator: it reads the package's
 // src/debian/control, resolves the build-dependency closure, fetches every
@@ -134,7 +135,7 @@ func runDebianPkgLock(op OpContext, name string, cfg debianRepoCfg) error {
 		RepoURL:      cfg.Repo,
 		SnapshotBase: cfg.Snapshot,
 		Dist:         cfg.Dist,
-		Arch:         cfg.Arch,
+		Arches:       op.Arches,
 		OutputDir:    op.OutputDir,
 		PkgName:      name,
 		Cookie:       cfg.Cookie,
@@ -142,7 +143,7 @@ func runDebianPkgLock(op OpContext, name string, cfg debianRepoCfg) error {
 	if err != nil {
 		return err
 	}
-	log.From(op.Ctx, log.Lockfile).Info("generated %s (%s): %d packages", result.Path, result.Arch, result.Packages)
+	log.From(op.Ctx, log.Lockfile).Info("generated %s (%s): %d packages", result.Path, strings.Join(result.Arches, ","), result.Packages)
 	return nil
 }
 

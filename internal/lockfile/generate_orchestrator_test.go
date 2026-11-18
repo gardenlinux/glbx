@@ -284,7 +284,7 @@ func TestGenerateEndToEnd(t *testing.T) {
 		Store:     store,
 		RepoURL:   fr.srv.URL,
 		Dist:      "testing",
-		Arch:      "amd64",
+		Arches:    []string{"amd64"},
 		OutputDir: outputDir,
 		PkgName:   "mypkg",
 	})
@@ -293,8 +293,8 @@ func TestGenerateEndToEnd(t *testing.T) {
 	}
 
 	// Result invariants.
-	if res.Arch != "amd64" {
-		t.Errorf("res.Arch = %q, want amd64", res.Arch)
+	if len(res.Arches) != 1 || res.Arches[0] != "amd64" {
+		t.Errorf("res.Arches = %v, want [amd64]", res.Arches)
 	}
 	if res.Packages == 0 {
 		t.Errorf("res.Packages = 0; expected at least the implicit roots")
@@ -353,7 +353,7 @@ func TestGenerateRejectsMissingControl(t *testing.T) {
 		Store:     store,
 		RepoURL:   fr.srv.URL,
 		Dist:      "testing",
-		Arch:      "amd64",
+		Arches:    []string{"amd64"},
 		OutputDir: outputDir,
 		PkgName:   "ghost",
 	})
@@ -390,7 +390,7 @@ func TestGenerateRootfsEndToEnd(t *testing.T) {
 		Store:     store,
 		RepoURL:   fr.srv.URL,
 		Dist:      "testing",
-		Arch:      "amd64",
+		Arches:    []string{"amd64"},
 		OutputDir: outputDir,
 	})
 	if err != nil {

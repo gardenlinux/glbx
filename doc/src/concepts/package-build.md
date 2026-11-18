@@ -102,9 +102,9 @@ architecture the lockfile has been generated for, **or** a single `all` file whe
 the `.deb` is architecture-independent — never a mix. So a lockfile can pin more
 than one target architecture at once: each tool simply lists an `amd64` file and
 an `arm64` file side by side (as `gcc-14` does above), while an `all` tool like
-`debhelper` carries the one file that serves every architecture. How a file for a
-second architecture comes to sit beside the first is described under
-[Generating the lock](#generating-the-lock).
+`debhelper` carries the one file that serves every architecture. A single lock run
+resolves every requested architecture together and writes all their files at once,
+as described under [Generating the lock](#generating-the-lock).
 
 As with `sources.yml`, the hash is the identity and the URLs are only how a
 builder *obtains* the bytes when the object store does not already hold them;
@@ -136,37 +136,38 @@ into the source tree, and then resolves and writes the lock from that. The
 developer never runs the packaging's tooling by hand; `glbx lockfile pkg:<name>`
 remains the whole interface.
 
-#### One run locks one architecture, and merges
+#### One run locks every architecture, wholesale
 
-A single `glbx lockfile` invocation resolves for exactly **one** target
-architecture — the host architecture by default, or whichever is named by the
-`arch` provider parameter (`--params arch=arm64`). It does not resolve every
-architecture at once. Instead the writer **merges** its one-architecture result
-into whatever lockfile already exists on disk:
+A single `glbx lockfile` invocation resolves **every** requested target
+architecture in one pass — `--architectures` (comma-separated, default
+`amd64,arm64`) names the set; `--architectures amd64` is the single-arch fast path
+for a quick local check. It resolves each architecture against the same
+repo/dist/snapshot, unions the results, and writes the lockfile **wholesale**: the
+file already on disk is ignored and fully overwritten, never merged.
 
-- the concrete architectures this run resolved are rewritten wholesale (so
-  re-locking an architecture is idempotent and drops entries it no longer needs);
-- entries for other concrete architectures are preserved untouched;
-- arch-independent `all` entries are preserved too, and the ones this run also
-  resolved are replaced in place rather than duplicated.
+Wholesale writing is what keeps re-locking clean. A package that no architecture
+resolves any more simply does not appear, so a binary-package rename across a
+version bump (e.g. `perl-modules-5.42` → `perl-modules-5.44`) cannot leave the old
+name pinned alongside the new one. (An earlier merge-based writer kept such orphan
+`all` entries indefinitely, and the stale `perl-modules` then broke the build
+container's `dpkg --configure` step.)
 
-So running `glbx lockfile pkg:foo` on an `arm64` host against a lockfile that
-already carries `amd64` pins **adds** the `arm64` pins beside them, yielding a
-dual-architecture file; running it against an empty slate yields a pure `arm64`
-file. A lockfile that pins several architectures is therefore built up one
-architecture at a time — typically by generating it once per architecture, each on
-a host of that architecture (or, for a pure index resolution, any host, since only
-the `debian-kernel` control-generation step actually executes target-architecture
-tooling). The same merge applies to every lock the command produces —
-`build-deps.yml`, `rootfs-deps.yml`, `image-type` / `tooling-deps.yml`, and the
-`tooling-pkg` build-tooling lock all flow through one writer.
+Arch-independent `all` packages are resolved into more than one architecture's set
+in the same pass and collapse to a single file entry. Because every architecture
+is resolved from the same point in time, those contributions must agree
+byte-for-byte: if two architectures pin the same `all` package at a different
+version or hash, that is treated as an archive inconsistency and the lock run fails
+rather than silently picking one. An `all` package needed by only one
+architecture's closure still appears once and flows into every architecture's
+install set, exactly as before.
 
-One asymmetry follows from the single shared `all` entry: because an `all` file is
-fed into *every* architecture's install set, a single-architecture relock never
-drops an `all` entry it didn't itself re-resolve — dropping one would silently
-remove it from the other architectures' sets too. Pruning an `all` package that no
-architecture needs any more therefore means regenerating the lockfile from a clean
-slate (or re-locking every architecture), not relocking just one.
+The same wholesale multi-architecture write applies to every lock the command
+produces — `build-deps.yml`, `rootfs-deps.yml`, `image-type` / `tooling-deps.yml`,
+and the `tooling-pkg` build-tooling lock all flow through one writer. Only the
+`debian-kernel` control-generation step actually executes tooling, and it runs once
+on the host-native architecture (control generation is architecture-neutral — the
+regenerated `debian/control` is committed as a single file), independent of which
+architectures the lock covers.
 
 ### The lockfile records availability, not use
 

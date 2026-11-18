@@ -53,7 +53,7 @@ func TestBuildSinglePackageE2E(t *testing.T) {
 	}
 	// lock
 	if _, err := lockfile.Generate(lockfile.Config{
-		Ctx: ctx, Store: store, Arch: arch, OutputDir: work, PkgName: pkg, Cookie: cookie,
+		Ctx: ctx, Store: store, Arches: []string{arch}, OutputDir: work, PkgName: pkg, Cookie: cookie,
 	}); err != nil {
 		t.Skipf("lockfile (network required): %v", err)
 	}
@@ -112,7 +112,7 @@ func TestBinaryValidationE2E(t *testing.T) {
 	if _, err := importer.Import(importer.ImportConfig{Ctx: ctx, Store: store, OutputDir: work, Cookie: cookie}, pkg); err != nil {
 		t.Skipf("import (network required): %v", err)
 	}
-	if _, err := lockfile.Generate(lockfile.Config{Ctx: ctx, Store: store, Arch: arch, OutputDir: work, PkgName: pkg, Cookie: cookie}); err != nil {
+	if _, err := lockfile.Generate(lockfile.Config{Ctx: ctx, Store: store, Arches: []string{arch}, OutputDir: work, PkgName: pkg, Cookie: cookie}); err != nil {
 		t.Skipf("lockfile (network required): %v", err)
 	}
 

@@ -24,7 +24,7 @@ func TestWriteBuildDeps(t *testing.T) {
 		{Name: "gcc-14", Version: "14.2.0-3", Architecture: "amd64", SHA256: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", SHA1: "1111111111111111111111111111111111111111", Filename: "pool/main/g/gcc-14/gcc-14_amd64.deb"},
 		{Name: "debhelper", Version: "13.20", Architecture: "all", SHA256: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", SHA1: "2222222222222222222222222222222222222222", Filename: "pool/main/d/debhelper/debhelper_all.deb"},
 	}
-	if err := writeBuildDeps(path, "https://deb.debian.org/debian", "", pkgs); err != nil {
+	if err := writeBuildDeps(path, "https://deb.debian.org/debian", "", [][]*index.Package{pkgs}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -59,30 +59,26 @@ func TestWriteBuildDeps(t *testing.T) {
 func TestWriteBuildDepsRejectsMissingHash(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "build-deps.yml")
 	pkgs := []*index.Package{{Name: "x", Version: "1", Architecture: "amd64", Filename: "pool/x.deb"}}
-	if err := writeBuildDeps(path, "https://example", "", pkgs); err == nil {
+	if err := writeBuildDeps(path, "https://example", "", [][]*index.Package{pkgs}); err == nil {
 		t.Fatal("expected error for package with no SHA256")
 	}
 }
 
-// Writing a second architecture into an existing lockfile must merge: arch-
-// specific pins for the already-present arch are kept, shared "all" packages are
-// carried, and the newly-locked arch's pins are added alongside.
-func TestWriteBuildDepsMergesArches(t *testing.T) {
+// A single wholesale write covering multiple architectures must union them: each
+// concrete-arch package keeps its own pin, and a shared "all" package appears
+// exactly once.
+func TestWriteBuildDepsUnionsArches(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "build-deps.yml")
 
 	amd64 := []*index.Package{
 		{Name: "gcc", Version: "14-amd64", Architecture: "amd64", SHA256: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", SHA1: "1111111111111111111111111111111111111111", Filename: "pool/g/gcc/gcc_amd64.deb"},
 		{Name: "debhelper", Version: "13", Architecture: "all", SHA256: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", SHA1: "2222222222222222222222222222222222222222", Filename: "pool/d/debhelper/debhelper_all.deb"},
 	}
-	if err := writeBuildDeps(path, "https://deb.debian.org/debian", "", amd64); err != nil {
-		t.Fatal(err)
-	}
-
 	arm64 := []*index.Package{
 		{Name: "gcc", Version: "14-arm64", Architecture: "arm64", SHA256: "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", SHA1: "3333333333333333333333333333333333333333", Filename: "pool/g/gcc/gcc_arm64.deb"},
 		{Name: "debhelper", Version: "13", Architecture: "all", SHA256: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", SHA1: "2222222222222222222222222222222222222222", Filename: "pool/d/debhelper/debhelper_all.deb"},
 	}
-	if err := writeBuildDeps(path, "https://deb.debian.org/debian", "", arm64); err != nil {
+	if err := writeBuildDeps(path, "https://deb.debian.org/debian", "", [][]*index.Package{amd64, arm64}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -95,14 +91,14 @@ func TestWriteBuildDepsMergesArches(t *testing.T) {
 		byName[tl.Name] = tl
 	}
 
-	// gcc must now carry BOTH amd64 and arm64 pins.
+	// gcc must carry BOTH amd64 and arm64 pins.
 	gcc := byName["gcc"]
 	arches := map[string]bool{}
 	for _, f := range gcc.Files {
 		arches[f.Arch] = true
 	}
 	if !arches["amd64"] || !arches["arm64"] {
-		t.Errorf("gcc should carry amd64+arm64 after merge, got files %+v", gcc.Files)
+		t.Errorf("gcc should carry amd64+arm64, got files %+v", gcc.Files)
 	}
 
 	// FilesForArch must pick the right pin for each arch.
@@ -120,30 +116,22 @@ func TestWriteBuildDepsMergesArches(t *testing.T) {
 	}
 }
 
-// TestWriteBuildDepsPreservesUnresolvedAllPackage guards the subtle case where an
-// arch-independent ("all") package is in one arch's build closure but NOT in
-// another's. Relocking the second arch must NOT drop that "all" package, because
-// FilesForArch feeds every "all" file into every arch's install set — dropping it
-// would silently remove it from the FIRST arch's effective set too. (Concretely:
-// fonts-croscore was an amd64-only build-tooling dep that shipped as "all"; an
-// early merge impl dropped it when relocking arm64, corrupting the amd64 lock.)
-func TestWriteBuildDepsPreservesUnresolvedAllPackage(t *testing.T) {
+// An "all" package in only ONE arch's closure within the same pass is still
+// written once and flows into every arch's install set (FilesForArch feeds every
+// "all" file to every arch). This is the legitimate asymmetric-"all" case, now
+// handled naturally by the union rather than by cross-relock preservation.
+func TestWriteBuildDepsUnionKeepsAsymmetricAllPackage(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "build-deps.yml")
 
-	// amd64 closure includes an "all" package (fonts) that arm64 will NOT need.
 	amd64 := []*index.Package{
 		{Name: "gcc", Version: "14-amd64", Architecture: "amd64", SHA256: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", SHA1: "1111111111111111111111111111111111111111", Filename: "pool/g/gcc/gcc_amd64.deb"},
 		{Name: "fonts", Version: "1", Architecture: "all", SHA256: "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd", SHA1: "4444444444444444444444444444444444444444", Filename: "pool/f/fonts/fonts_all.deb"},
 	}
-	if err := writeBuildDeps(path, "https://deb.debian.org/debian", "", amd64); err != nil {
-		t.Fatal(err)
-	}
-
-	// arm64 resolution does NOT include "fonts" at all.
+	// arm64 resolution does NOT include "fonts".
 	arm64 := []*index.Package{
 		{Name: "gcc", Version: "14-arm64", Architecture: "arm64", SHA256: "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", SHA1: "3333333333333333333333333333333333333333", Filename: "pool/g/gcc/gcc_arm64.deb"},
 	}
-	if err := writeBuildDeps(path, "https://deb.debian.org/debian", "", arm64); err != nil {
+	if err := writeBuildDeps(path, "https://deb.debian.org/debian", "", [][]*index.Package{amd64, arm64}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -156,20 +144,40 @@ func TestWriteBuildDepsPreservesUnresolvedAllPackage(t *testing.T) {
 		byName[tl.Name] = tl
 	}
 
-	// The "all" fonts package must still be present after the arm64 relock.
 	fonts, ok := byName["fonts"]
 	if !ok {
-		t.Fatalf("fonts ('all') was dropped by arm64 relock; it must be preserved")
+		t.Fatalf("asymmetric 'all' package fonts was dropped; it must be present")
 	}
 	if len(fonts.Files) != 1 || fonts.Files[0].Arch != "all" {
 		t.Errorf("fonts should keep its single 'all' file, got %+v", fonts.Files)
 	}
-	// And it must flow into BOTH arches' install sets.
 	for _, arch := range []string{"amd64", "arm64"} {
 		files := buildcfg.FilesForArch([]buildcfg.PinnedTool{fonts}, arch)
 		if len(files) != 1 || files[0].Arch != "all" {
 			t.Errorf("FilesForArch(%s) for fonts = %+v, want the 'all' pin", arch, files)
 		}
+	}
+}
+
+// Two arches resolving the SAME "all" package to DIFFERENT versions or hashes is
+// a Packages-index inconsistency and must be a hard error, not silently resolved
+// by picking one. Guards against the perl-modules-style dual-pin that this change
+// eliminates.
+func TestWriteBuildDepsRejectsDivergentAllPackage(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "build-deps.yml")
+
+	amd64 := []*index.Package{
+		{Name: "perl-modules", Version: "5.42", Architecture: "all", SHA256: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", SHA1: "1111111111111111111111111111111111111111", Filename: "pool/p/perl/perl-modules_5.42_all.deb"},
+	}
+	arm64 := []*index.Package{
+		{Name: "perl-modules", Version: "5.44", Architecture: "all", SHA256: "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", SHA1: "3333333333333333333333333333333333333333", Filename: "pool/p/perl/perl-modules_5.44_all.deb"},
+	}
+	err := writeBuildDeps(path, "https://deb.debian.org/debian", "", [][]*index.Package{amd64, arm64})
+	if err == nil {
+		t.Fatal("expected error when an 'all' package differs across architectures")
+	}
+	if !strings.Contains(err.Error(), "perl-modules") {
+		t.Errorf("error should name the divergent package, got: %v", err)
 	}
 }
 
@@ -246,8 +254,8 @@ func TestConfigApplyDefaults(t *testing.T) {
 	if cfg.Dist != "testing" {
 		t.Errorf("Dist: %q", cfg.Dist)
 	}
-	if cfg.Arch == "" {
-		t.Errorf("Arch should be detected, got empty")
+	if len(cfg.Arches) != len(DefaultArches) {
+		t.Errorf("Arches should default to %v, got %v", DefaultArches, cfg.Arches)
 	}
 	if cfg.Ctx == nil {
 		t.Errorf("Ctx should default to background")
@@ -256,9 +264,9 @@ func TestConfigApplyDefaults(t *testing.T) {
 
 func TestConfigApplyDefaultsRespectsExplicit(t *testing.T) {
 	ctx := context.WithValue(context.Background(), struct{}{}, "x")
-	cfg := &Config{RepoURL: "http://mirror.local/debian", Dist: "bookworm", Arch: "arm64", Ctx: ctx}
+	cfg := &Config{RepoURL: "http://mirror.local/debian", Dist: "bookworm", Arches: []string{"arm64"}, Ctx: ctx}
 	cfg.applyDefaults()
-	if cfg.RepoURL != "http://mirror.local/debian" || cfg.Dist != "bookworm" || cfg.Arch != "arm64" || cfg.Ctx != ctx {
+	if cfg.RepoURL != "http://mirror.local/debian" || cfg.Dist != "bookworm" || len(cfg.Arches) != 1 || cfg.Arches[0] != "arm64" || cfg.Ctx != ctx {
 		t.Errorf("explicit values overwritten: %+v", cfg)
 	}
 }
@@ -266,7 +274,7 @@ func TestConfigApplyDefaultsRespectsExplicit(t *testing.T) {
 func TestRootfsConfigApplyDefaults(t *testing.T) {
 	cfg := &RootfsConfig{}
 	cfg.applyDefaults()
-	if cfg.RepoURL == "" || cfg.Dist == "" || cfg.Arch == "" {
+	if cfg.RepoURL == "" || cfg.Dist == "" || len(cfg.Arches) == 0 {
 		t.Errorf("defaults not applied: %+v", cfg)
 	}
 }

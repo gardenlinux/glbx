@@ -1,6 +1,8 @@
 package provider
 
 import (
+	"strings"
+
 	"github.com/gardenlinux/glbx/internal/lockfile"
 	"github.com/gardenlinux/glbx/internal/log"
 )
@@ -31,13 +33,13 @@ func (rootfsLock) Generate(op OpContext, _ string) error {
 		RepoURL:      cfg.Repo,
 		SnapshotBase: cfg.Snapshot,
 		Dist:         cfg.Dist,
-		Arch:         cfg.Arch,
+		Arches:       op.Arches,
 		OutputDir:    op.OutputDir,
 		Cookie:       cfg.Cookie,
 	})
 	if err != nil {
 		return err
 	}
-	log.From(op.Ctx, log.Lockfile).Info("generated %s (%s): %d packages", result.Path, result.Arch, result.Packages)
+	log.From(op.Ctx, log.Lockfile).Info("generated %s (%s): %d packages", result.Path, strings.Join(result.Arches, ","), result.Packages)
 	return nil
 }
