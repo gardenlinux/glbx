@@ -19,9 +19,11 @@ package provider
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 	"sort"
 	"strings"
 
+	"github.com/gardenlinux/glbx/internal/buildcfg"
 	"github.com/gardenlinux/glbx/internal/objstore"
 )
 
@@ -128,6 +130,56 @@ type LockGenerator interface {
 	// "pkg"/"debian"/"debian-kernel"; "" for "rootfs"), logging its own
 	// completion through op.Ctx.
 	Generate(op OpContext, arg string) error
+}
+
+// ConflictResolver is an optional capability a LockGenerator may implement: an
+// automatic attempt to resolve the mechanical merge conflicts updates of its
+// pkg_type produce. The kernel is the motivating case — its debian/control is a
+// generated file carrying version markers, so every import-based update collides
+// with the committed control, and the correct resolution is simply to regenerate
+// it. A generator that does not implement this interface has no auto-resolution
+// (plain Debian packages); callers detect that with a failed type assertion.
+type ConflictResolver interface {
+	// ResolveConflicts runs the pkg_type's resolution strategy for the package
+	// named arg in the working tree at op.OutputDir, which is mid-merge (git
+	// merge has stopped with conflicts staged). It overwrites the files it can
+	// regenerate, git-adds them, and reports whether the tree is now free of
+	// unmerged entries (resolved true) or whether other conflicts remain
+	// (resolved false). It never reverts a resolution it made and never commits;
+	// the caller owns the merge commit. A non-nil error is a failure to run the
+	// strategy at all, distinct from resolved=false (ran, conflicts remain).
+	ResolveConflicts(op OpContext, arg string) (resolved bool, err error)
+}
+
+// LookupConflictResolver returns the auto-conflict-resolution strategy for a
+// package, selected the same way lockfile generation is: by the pkg_type field
+// in pkgs/<arg>/build.yml. It returns (nil, nil) — "no auto-resolution
+// available" rather than an error — when build.yml is absent, sets no pkg_type,
+// or selects a generator that does not implement ConflictResolver. Reading
+// build.yml from the working tree is correct here: auto-resolution runs on the
+// branch the import is being merged into, where build.yml always exists (it is
+// not part of a package's upstream lineage). Any other failure to load or
+// dispatch build.yml is returned as an error.
+func LookupConflictResolver(op OpContext, arg string) (ConflictResolver, error) {
+	pkgDir := filepath.Join(op.OutputDir, "pkgs", arg)
+	build, err := buildcfg.LoadBuildYML(pkgDir)
+	if err != nil {
+		return nil, err
+	}
+	if build.PkgType == "" {
+		// Missing build.yml or no pkg_type: LoadBuildYML already maps an absent
+		// file to an empty BuildYML, so both collapse to "no auto-resolution".
+		return nil, nil
+	}
+	g, err := LookupLockGenerator(build.PkgType)
+	if err != nil {
+		return nil, fmt.Errorf("pkg %q: %w", arg, err)
+	}
+	resolver, ok := g.(ConflictResolver)
+	if !ok {
+		return nil, nil
+	}
+	return resolver, nil
 }
 
 // The installed providers, keyed by namespace.

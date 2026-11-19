@@ -56,6 +56,46 @@ func (debianKernelLock) Generate(op OpContext, arg string) error {
 	return runDebianPkgLock(op, arg, cfg)
 }
 
+// ResolveConflicts implements ConflictResolver for the kernel: it resolves the
+// git merge conflict a kernel update always produces on the generated
+// debian/control by regenerating that file from the merged-in source — the same
+// gen-control step the lock path runs — then git-adding it so it drops out of
+// the unmerged set. It never reverts: any conflict on a file other than the ones
+// it regenerates is left staged for the human, and resolved reports whether any
+// such conflict remains.
+func (debianKernelLock) ResolveConflicts(op OpContext, arg string) (bool, error) {
+	cfg, err := debianRepoConfig(op.Params)
+	if err != nil {
+		return false, err
+	}
+	pkgDir := filepath.Join(op.OutputDir, "pkgs", arg)
+	build, err := buildcfg.LoadBuildYML(pkgDir)
+	if err != nil {
+		return false, err
+	}
+
+	// Regenerate debian/control from the (merged-in) source tree, overwriting the
+	// conflicted file in place. This is the mechanical resolution; it reads the
+	// current src/, so it reflects the new upstream version being merged.
+	if err := regenControlInContainer(op, pkgDir, build.GenControlPkgs, cfg); err != nil {
+		return false, fmt.Errorf("regenerate debian/control: %w", err)
+	}
+
+	// Stage the regenerated file so it leaves the unmerged set. regenControl
+	// copies back only debian/control today, so that is the one path to add; the
+	// git-add path is relative to the working-tree root.
+	controlPath := filepath.Join("pkgs", arg, "src", "debian", "control")
+	if err := gitAdd(op.OutputDir, controlPath); err != nil {
+		return false, err
+	}
+
+	remaining, err := hasRemainingConflicts(op.OutputDir)
+	if err != nil {
+		return false, err
+	}
+	return !remaining, nil
+}
+
 // regenControlInContainer stands up an ephemeral chroot from the essential set
 // plus the configured gen-control packages, copies the package's src/ tree into
 // it, runs the package's control generator, and copies the regenerated

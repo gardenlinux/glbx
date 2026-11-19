@@ -8,9 +8,9 @@ import (
 	"io"
 	"os"
 	"os/exec"
-	"syscall"
 
 	"github.com/gardenlinux/glbx/internal/log"
+	"github.com/gardenlinux/glbx/internal/objstore"
 	"github.com/gardenlinux/glbx/internal/provider"
 )
 
@@ -119,18 +119,84 @@ func cmdImport(args []string) error {
 	}
 	l.Info("imported %s %s as %s; git merging…", result.Name, result.Version, short)
 
-	// Replace this process with git merge so its exit status and output
-	// (including an unresolved conflict) propagate verbatim.
-	gitPath, err := exec.LookPath("git")
-	if err != nil {
-		return fmt.Errorf("git not found: %w", err)
-	}
-	argv := []string{"git", "-C", *outputDir, "merge", "--no-edit"}
+	return runMergeWithAutoResolve(ctx, l, store, *outputDir, parsedParams, target.Namespace, result)
+}
+
+// runMergeWithAutoResolve merges the import commit into the current branch as a
+// subprocess (not syscall.Exec, so the process survives to act on the outcome).
+// A clean merge is left as git made it. A conflicting merge triggers an optional
+// per-pkg_type auto-resolution attempt: if the package's build.yml selects a
+// strategy and it clears every conflict, the merge is finalized with a commit
+// and the import succeeds; otherwise the partial resolution is left staged, the
+// working-tree status is printed, and a non-zero result is returned so the
+// exit-status contract (0 only when the tree is conflict-free) is preserved.
+func runMergeWithAutoResolve(ctx context.Context, l *log.Logger, store *objstore.Store, outputDir string, params provider.Params, namespace string, result *provider.ImportResult) error {
+	argv := []string{"-C", outputDir, "merge", "--no-edit"}
 	if result.FirstImport {
 		argv = append(argv, "--allow-unrelated-histories")
 	}
 	argv = append(argv, result.CommitHash)
-	return syscall.Exec(gitPath, argv, os.Environ())
+
+	merge := exec.Command("git", argv...)
+	merge.Stdin = os.Stdin
+	merge.Stdout = os.Stdout
+	merge.Stderr = os.Stderr
+	err := merge.Run()
+	if err == nil {
+		// Clean merge: git already produced the merge commit.
+		return nil
+	}
+	if _, ok := err.(*exec.ExitError); !ok {
+		return fmt.Errorf("git merge: %w", err)
+	}
+
+	// The merge stopped with conflicts. Attempt an auto-resolution if this
+	// package's pkg_type defines one; if it does not, the conflict stands exactly
+	// as it does today.
+	op := provider.OpContext{Ctx: ctx, Store: store, OutputDir: outputDir, Params: params}
+	resolver, lerr := provider.LookupConflictResolver(op, result.Name)
+	if lerr != nil {
+		return lerr
+	}
+	if resolver == nil {
+		return fmt.Errorf("merge of %s left unresolved conflicts and no auto-resolution is available for this package; resolve them, then commit", result.Name)
+	}
+
+	l.Info("merge conflicted; attempting %s auto-resolution for %s…", namespace, result.Name)
+	resolved, rerr := resolver.ResolveConflicts(op, result.Name)
+	if rerr != nil {
+		return fmt.Errorf("auto-resolve conflicts: %w", rerr)
+	}
+	if !resolved {
+		if status, serr := printGitStatus(outputDir); serr != nil {
+			l.Error("could not read git status: %v", serr)
+		} else {
+			fmt.Fprint(os.Stderr, status)
+		}
+		return fmt.Errorf("auto-resolution handled its own files but other conflicts remain; resolve them (see status above), then commit")
+	}
+
+	// Every conflict is resolved and staged: finalize the merge commit, the same
+	// way git would have for a clean merge.
+	commit := exec.Command("git", "-C", outputDir, "commit", "--no-edit")
+	commit.Stdin = os.Stdin
+	commit.Stdout = os.Stdout
+	commit.Stderr = os.Stderr
+	if cerr := commit.Run(); cerr != nil {
+		return fmt.Errorf("commit auto-resolved merge: %w", cerr)
+	}
+	l.Info("auto-resolved merge conflicts for %s and committed the merge", result.Name)
+	return nil
+}
+
+// printGitStatus returns the short-format working-tree status, for surfacing
+// what remains after a partial auto-resolution.
+func printGitStatus(outputDir string) (string, error) {
+	out, err := exec.Command("git", "-C", outputDir, "status", "--short").Output()
+	if err != nil {
+		return "", err
+	}
+	return string(out), nil
 }
 
 // importJSON is the machine-readable result printed on stdout by import

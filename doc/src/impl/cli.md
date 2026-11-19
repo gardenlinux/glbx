@@ -13,8 +13,9 @@ command name, `os.Args[2:]` as its arguments, and switches on the name to a
 `cmdXxx(args []string) error` function. The known names are, exactly:
 
 ```
-import  get-pkg-metadata  check-updates  lockfile  build  graph
-cache   restore-cache     publish        resolve    status exec-chroot
+import  get-pkg-metadata  check-updates  lockfile  resolve-conflicts
+build   graph             cache          restore-cache
+publish resolve           status         exec-chroot  sbom
 ```
 
 `help`/`--help`/`-h` print usage; an unknown command logs an error and exits `2`.
@@ -107,11 +108,37 @@ no package is an error.
 - `--output <dir>` is the working-tree root to import into (default `.`).
 
 Default behaviour records the import as a commit on the package's upstream
-lineage, then merges it into the current branch by **replacing the process with
-`git merge --no-edit`** (`syscall.Exec`), so the merge's exit status and output —
-including an unresolved conflict — propagate verbatim. A first import of a package
-(an unrelated lineage) adds `--allow-unrelated-histories`. The git-lineage
-mechanics live in `internal/importer/git.go`.
+lineage, then merges it into the current branch by running **`git merge
+--no-edit`** as a subprocess (inheriting stdio), so the merge's output —
+including an unresolved conflict — is shown verbatim. A first import of a package
+(an unrelated lineage) adds `--allow-unrelated-histories`. A clean merge is left
+as git made it. On a conflict, `import` looks up an optional
+auto-conflict-resolution strategy for the merged package
+(`provider.LookupConflictResolver`, dispatched on `build.yml`'s `pkg_type`): with
+no strategy the conflict stands and `import` exits non-zero as before; with one,
+it runs the strategy and, if every conflict is cleared, finalizes the merge with
+`git commit --no-edit`. If conflicts remain it prints `git status` and exits
+non-zero — the exit status is 0 only when the tree is conflict-free. The
+git-lineage mechanics live in `internal/importer/git.go`.
+
+### `resolve-conflicts` — `resolve_conflicts.go`
+
+```console
+$ glbx resolve-conflicts linux
+```
+
+Runs a package's `pkg_type` auto-conflict-resolution strategy on a `git merge`
+already in progress in the working tree, standalone — the manual counterpart to
+the step `import` runs inline. It is for a driver that performs its own merge: the
+CI update pipeline imports with `--no-merge`, merges the pristine commit itself,
+and on conflict calls this to attempt the mechanical resolution before falling
+back to a draft PR. It does **not** merge and does **not** commit (the caller owns
+the commit); it regenerates and git-adds the files the strategy owns, prints the
+resulting `git status`, and exits 0 only when no conflict remains. A `pkg_type`
+with no strategy (plain Debian, or no `build.yml`/`pkg_type`) exits non-zero with
+a clear message so a driver can branch on it. Flags mirror `lockfile`
+(`--params`, `--cache`, `--output`, `--stub`) because a strategy may need the
+store and the exec-env stub to run in a container (the kernel does).
 
 ### `get-pkg-metadata` — `get_pkg_metadata.go`
 

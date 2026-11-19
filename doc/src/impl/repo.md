@@ -118,6 +118,25 @@ returns only an error — a lock's outcome (which file, how many packages) is a 
 line emitted through `op.Ctx`, and anything a machine needs is readable from the
 written lock file on disk.
 
+A lock generator may additionally implement the optional `ConflictResolver`
+interface — an automatic attempt to resolve the mechanical merge conflicts
+updates of its `pkg_type` produce:
+
+```go
+type ConflictResolver interface {
+	ResolveConflicts(op OpContext, arg string) (resolved bool, err error)
+}
+```
+
+`LookupConflictResolver` selects it by the same `pkg_type` dispatch as lockfile
+generation (read from `pkgs/<arg>/build.yml`) and returns `(nil, nil)` — "no
+auto-resolution available", not an error — when `build.yml` is absent, sets no
+`pkg_type`, or names a generator that does not implement the interface.
+`debianKernelLock` implements it (regenerate the generated `debian/control`,
+git-add it, report whether other conflicts remain); `debianLock` does not. The
+`import` command and the standalone `resolve-conflicts` command both drive it
+(see the CLI doc).
+
 Registration is by `init()` in each provider file. `RegisterImporter` and
 `RegisterLockGenerator` populate two package-level maps keyed by namespace;
 `LookupImporter` / `LookupLockGenerator` resolve them and report the known set on
@@ -200,6 +219,17 @@ It then falls through to `runDebianPkgLock` over the freshly materialized
 control. The `gen-repo` / `gen-dist` / `gen-arch` params let the
 control-generation container target a different repo/dist/arch than the resolved
 lock; they default to the resolved values.
+
+`debianKernelLock` also implements `ConflictResolver`: `ResolveConflicts` reuses
+the very same `regenControlInContainer` to resolve the `debian/control` conflict
+a kernel update always produces (both merge sides regenerated control from
+different versions). It regenerates control from the merged-in source, git-adds
+it so it leaves the unmerged set, and returns whether `git ls-files --unmerged`
+is now empty — resolving the mechanical conflict while still surfacing any
+genuine conflict in another file. It never reverts and never commits.
+
+**`git.go`** holds the small git plumbing the resolver needs: `hasRemainingConflicts`
+(unmerged-index probe via `git ls-files --unmerged`) and `gitAdd`.
 
 **`pkg.go`** holds `pkgForward`, the recommended developer entry point. It reads
 `pkg_type` from `pkgs/<name>/build.yml` and delegates to the concrete generator
