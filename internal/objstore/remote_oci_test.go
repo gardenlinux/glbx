@@ -187,7 +187,7 @@ func TestOCI_MapResolvesToManifestHash(t *testing.T) {
 		t.Fatalf("publish manifest blob: %v", err)
 	}
 	id := MustHash("1212121212121212121212121212121212121212121212121212121212121212")
-	if err := reg.aliasMap(id, mh); err != nil {
+	if err := reg.aliasMap(id, mh, int64(len(manifestBlob))); err != nil {
 		t.Fatalf("aliasMap: %v", err)
 	}
 

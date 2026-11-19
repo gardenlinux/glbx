@@ -494,13 +494,30 @@ func (r *ociRegistry) publishBlob(h Hash, data []byte) error {
 	return nil
 }
 
-// aliasMap points the map-<id> tag at the exact manifest blob-<value> already
-// names, by resolving that manifest and re-putting it under the map tag. map-<id>
-// and blob-<value> then resolve to the same manifest digest, so the map entry is
-// a pure registry-side tag over an already-published blob — no local bytes, no
-// size computation. It assumes blob-<value> is present, the published-blobs-first
-// contract every publish path upholds.
-func (r *ociRegistry) aliasMap(id, value Hash) error {
+// aliasMap points the map-<id> tag at the one-layer manifest that wraps blob
+// value, so map-<id> and blob-<value> resolve to byte-identical manifests (hence
+// the same digest). The manifest is reconstructed locally from value and its
+// size — oneLayerManifest is deterministic, and phase 1 PUT exactly this manifest
+// under blob-<value> — so no manifest is read back from the registry. That read
+// was a read-after-write on blob-<value>: a GET of a tag this same run had just
+// PUT, which ghcr's eventually-consistent tag index can 404 for a few seconds
+// after a successful PUT, failing publish spuriously. Reconstructing instead of
+// resolving removes that round-trip entirely. The caller supplies size from the
+// local store (the value blob is a published-blobs-first worklist entry, present
+// locally in every same-run path). When the blob is not local — the separate,
+// later --aliases-from run — the caller uses aliasMapFromRegistry instead.
+func (r *ociRegistry) aliasMap(id, value Hash, size int64) error {
+	return r.putManifest(mapTag(id), oneLayerManifest(value, size))
+}
+
+// aliasMapFromRegistry points the map-<id> tag at the exact manifest blob-<value>
+// already names, by resolving that manifest from the registry and re-putting it
+// under the map tag. It is the cold-runner path for aliases whose value blob is
+// not in the local store: a later --aliases-from run sets aliases an earlier
+// --aliases-to run withheld, long after that run uploaded blob-<value>, so the
+// GET is outside any read-after-write window. aliasMap is preferred whenever the
+// value blob is local, because it needs no registry read at all.
+func (r *ociRegistry) aliasMapFromRegistry(id, value Hash) error {
 	m, err := r.getManifest(blobTag(value))
 	if err != nil {
 		return fmt.Errorf("resolve blob %s: %w", value, err)
