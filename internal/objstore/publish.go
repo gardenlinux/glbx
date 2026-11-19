@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"sync"
 	"sync/atomic"
 )
@@ -78,12 +79,24 @@ func (p *Publisher) EnsureBlob(h Hash) (uploaded, missing bool, err error) {
 	return true, false, nil
 }
 
-// EnsureAlias sets the map-<key> tag if absent, pointing it at the exact
-// manifest blob-<value> already names so the two resolve to the same digest.
-// The value blob must have been published first — every publish path ensures
-// the alias's value is in the blob worklist uploaded ahead of the aliases — so
-// this reads nothing locally and works on a cold runner against blobs a prior
-// run put up.
+// EnsureAlias sets the map-<key> tag if absent, pointing it at the one-layer
+// manifest that wraps blob value, so map-<key> and blob-<value> resolve to
+// byte-identical manifests (hence the same digest).
+//
+// When the value blob is present in the local store — the common case, where the
+// same run just uploaded it as part of the published-blobs-first worklist — the
+// manifest is reconstructed locally from the blob's size and re-tagged without
+// reading anything back from the registry. This is the fix for ghcr's post-PUT
+// read-after-write window: previously EnsureAlias resolved blob-<value> with a
+// GET immediately after this same run had PUT it, and ghcr's eventually-consistent
+// tag index could 404 that GET for a few seconds, failing publish spuriously.
+//
+// When the value blob is absent locally — the cold-runner `--aliases-from` case,
+// where an earlier `--aliases-to` run uploaded the blobs and this later, separate
+// run only sets the withheld aliases — the size is not available locally, so the
+// manifest is resolved from the registry's blob-<value> tag. That read is safe
+// here: it targets a tag a *prior* run wrote, so the consistency window has long
+// since closed.
 func (p *Publisher) EnsureAlias(a MapAlias) (set bool, err error) {
 	exists, err := p.reg.tagExists(mapTag(a.Key))
 	if err != nil {
@@ -92,7 +105,18 @@ func (p *Publisher) EnsureAlias(a MapAlias) (set bool, err error) {
 	if exists {
 		return false, nil
 	}
-	if err := p.reg.aliasMap(a.Key, a.Value); err != nil {
+	if size, ok, err := p.localBlobSize(a.Value); err != nil {
+		return false, fmt.Errorf("alias %s: size of value blob %s: %w", a.Key, a.Value, err)
+	} else if ok {
+		// Local blob: reconstruct and tag with no registry read.
+		if err := p.reg.aliasMap(a.Key, a.Value, size); err != nil {
+			return false, err
+		}
+		return true, nil
+	}
+	// Blob not local: fall back to resolving it from the registry (cold-runner
+	// --aliases-from, outside the read-after-write window).
+	if err := p.reg.aliasMapFromRegistry(a.Key, a.Value); err != nil {
 		return false, err
 	}
 	return true, nil
@@ -252,4 +276,34 @@ func (p *Publisher) readLocal(h Hash) ([]byte, error) {
 	}
 	defer rc.Close()
 	return io.ReadAll(rc)
+}
+
+// localBlobSize reports a blob's byte size if it is present in the local store.
+// ok is false (with a nil error) when the blob is simply not local — the signal
+// EnsureAlias uses to fall back to resolving it from the registry; a non-nil
+// error is a real IO failure reading a blob that is present. It prefers a stat of
+// the on-disk path (no read) and falls back to streaming the content through a
+// counting discard for stores that do not expose a path. The size is the one
+// datum aliasMap needs to reconstruct blob-<h>'s one-layer manifest locally.
+func (p *Publisher) localBlobSize(h Hash) (size int64, ok bool, err error) {
+	if !p.local.Has(h) {
+		return 0, false, nil
+	}
+	if path, perr := p.local.Path(h); perr == nil {
+		fi, serr := os.Stat(path)
+		if serr != nil {
+			return 0, false, serr
+		}
+		return fi.Size(), true, nil
+	}
+	rc, oerr := p.local.Open(h)
+	if oerr != nil {
+		return 0, false, oerr
+	}
+	defer rc.Close()
+	n, cerr := io.Copy(io.Discard, rc)
+	if cerr != nil {
+		return 0, false, cerr
+	}
+	return n, true, nil
 }
