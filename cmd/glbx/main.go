@@ -26,6 +26,8 @@ func main() {
 		err = cmdCheckUpdates(args)
 	case "lockfile":
 		err = cmdLockfile(args)
+	case "resolve-conflicts":
+		err = cmdResolveConflicts(args)
 	case "build":
 		err = cmdBuild(args)
 	case "graph":
@@ -63,5 +65,5 @@ func main() {
 
 func usage() {
 	fmt.Fprintln(os.Stderr, "usage: glbx <command> [arguments]")
-	fmt.Fprintln(os.Stderr, "commands: import, get-pkg-metadata, check-updates, lockfile, build, graph, cache, restore-cache, publish, sbom, resolve, status, exec-chroot")
+	fmt.Fprintln(os.Stderr, "commands: import, get-pkg-metadata, check-updates, lockfile, resolve-conflicts, build, graph, cache, restore-cache, publish, sbom, resolve, status, exec-chroot")
 }

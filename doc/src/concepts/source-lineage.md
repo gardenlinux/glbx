@@ -26,6 +26,20 @@ pristine import, one side is the local integration state, the other side is the
 new pristine import. Git resolves what did not conflict and surfaces exactly
 what did.
 
+Some conflicts are mechanical and known in advance. A package whose
+`debian/control` is a *generated* file carrying version markers — the kernel —
+necessarily conflicts on that file at every update, because both sides
+regenerated it from different versions. For cases like this glbx offers an
+optional, per-`pkg_type` **auto-conflict-resolution** step: after a merge
+conflicts it re-runs the file-generation the `pkg_type` defines (for the kernel,
+the same gen-control step the lockfile path runs), overwrites and stages the
+regenerated files, and then reports whether any *other* conflict remains. It
+never reverts a resolution it made; a genuine conflict in some other file is
+still surfaced for a human. Plain Debian packages define no strategy and are
+unaffected. `glbx import` runs this inline on its own merge; `glbx
+resolve-conflicts <pkg>` exposes the same step as a standalone operation for a
+driver (the CI update pipeline) that performs its own merge.
+
 ## Independent per-package lineages
 
 Each source package has its own **import lineage**: a chain of pristine commits,
