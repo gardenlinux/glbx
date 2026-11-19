@@ -32,7 +32,7 @@ type Config struct {
 	Store     *objstore.Store
 	RepoURL   string
 	Dist      string
-	Arch      string
+	Arches    []string
 	OutputDir string
 	PkgName   string
 	Cookie    string
@@ -51,15 +51,16 @@ type Config struct {
 
 // Result summarizes a generated lock.
 type Result struct {
-	Arch     string
+	Arches   []string
 	Packages int
 	Path     string
 }
 
 // Generate produces build-deps.yml for one package: it reads the package's
-// declared build dependencies, resolves their closure against the binary index,
-// fetches and hash-verifies every resolved .deb into the store, and writes the
-// explicit per-architecture pinned-tooling file.
+// declared build dependencies, resolves their closure against the binary index
+// for every requested architecture, fetches and hash-verifies every resolved
+// .deb into the store, and writes the explicit multi-architecture pinned-tooling
+// file wholesale (see writeBuildDeps).
 func Generate(cfg Config) (*Result, error) {
 	cfg.applyDefaults()
 	l := log.From(cfg.Ctx, log.Lockfile)
@@ -76,35 +77,43 @@ func Generate(cfg Config) (*Result, error) {
 		return nil, fmt.Errorf("load build.yml: %w", err)
 	}
 
-	idx, err := FetchBinaryIndex(cfg.Ctx, cfg.Store, cfg.RepoURL, cfg.Dist, cfg.Arch, cfg.Cookie)
-	if err != nil {
-		return nil, fmt.Errorf("fetch binary index: %w", err)
-	}
+	var perArch [][]*index.Package
+	total := 0
+	for _, arch := range cfg.Arches {
+		idx, err := FetchBinaryIndex(cfg.Ctx, cfg.Store, cfg.RepoURL, cfg.Dist, arch, cfg.Cookie)
+		if err != nil {
+			return nil, fmt.Errorf("fetch binary index (%s): %w", arch, err)
+		}
 
-	roots := buildResolverRoots(buildDeps, idx, cfg.Arch, buildYML.BuildProfiles)
+		roots := buildResolverRoots(buildDeps, idx, arch, buildYML.BuildProfiles)
 
-	packages, err := resolveAndFetch(cfg.Ctx, cfg.Store, l, idx, roots, cfg.Arch, cfg.RepoURL)
-	if err != nil {
-		return nil, err
+		packages, err := resolveAndFetch(cfg.Ctx, cfg.Store, l, idx, roots, arch, cfg.RepoURL)
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", arch, err)
+		}
+		perArch = append(perArch, packages)
+		total += len(packages)
 	}
 
 	depsPath := filepath.Join(pkgDir, "build-deps.yml")
-	if err := writeBuildDeps(depsPath, cfg.RepoURL, cfg.SnapshotBase, packages); err != nil {
+	if err := writeBuildDeps(depsPath, cfg.RepoURL, cfg.SnapshotBase, perArch); err != nil {
 		return nil, fmt.Errorf("write build-deps.yml: %w", err)
 	}
 
-	return &Result{Arch: cfg.Arch, Packages: len(packages), Path: depsPath}, nil
+	return &Result{Arches: cfg.Arches, Packages: total, Path: depsPath}, nil
 }
 
 func (cfg *Config) applyDefaults() {
-	applyRepoDefaults(&cfg.RepoURL, &cfg.Dist, &cfg.Arch, &cfg.Ctx)
+	applyRepoDefaults(&cfg.RepoURL, &cfg.Dist, &cfg.Ctx)
+	cfg.Arches = defaultArches(cfg.Arches)
 	if cfg.SubDir == "" {
 		cfg.SubDir = "pkgs"
 	}
 }
 
 func (cfg *RootfsConfig) applyDefaults() {
-	applyRepoDefaults(&cfg.RepoURL, &cfg.Dist, &cfg.Arch, &cfg.Ctx)
+	applyRepoDefaults(&cfg.RepoURL, &cfg.Dist, &cfg.Ctx)
+	cfg.Arches = defaultArches(cfg.Arches)
 }
 
 // resolveAndFetch runs the resolver over roots, fetches and hash-verifies every
@@ -125,116 +134,80 @@ func resolveAndFetch(ctx context.Context, store *objstore.Store, l *log.Logger,
 	return result.Packages, nil
 }
 
-// writeBuildDeps serializes the resolved package set as the explicit build-deps
-// YAML: one tool per package, each with its exact version and a single file
-// recording the architecture, content hash, and retrieval URLs of its .deb. The
+// writeBuildDeps serializes the resolved package sets as the explicit build-deps
+// YAML: one tool per package, each with its exact version and one file per
+// architecture recording the content hash and retrieval URLs of its .deb. The
 // mirror URL is recorded first and the hash-addressed snapshot URL second.
 //
-// A lockfile can pin more than one target architecture: each tool's files list
-// carries one entry per architecture (plus arch-independent "all" packages). To
-// support that, writeBuildDeps MERGES into any lockfile already at path rather
-// than overwriting it. Every CONCRETE architecture the new resolution covers is
-// replaced wholesale (so re-locking an arch is idempotent and drops packages it
-// no longer needs), while entries for concrete architectures the new resolution
-// does not cover are preserved untouched. This lets `glbx lockfile --arch arm64`
-// add arm64 pins to a committed amd64 lockfile without clobbering the amd64 ones.
+// The write is WHOLESALE and state-oblivious: the lockfile already at path (if
+// any) is ignored and fully overwritten. perArch carries one resolved package
+// slice per requested architecture; all of them are unioned into a single
+// lockfile in this one call. This is what keeps re-locking idempotent and free
+// of stale leftovers — a package no longer resolved by any arch simply does not
+// appear, so a binary-package rename on a version bump (e.g. perl-modules-5.42 →
+// perl-modules-5.44) cannot leave the old name dangling.
 //
-// Arch-independent ("all") entries are treated specially: they are NOT dropped
-// just because the current arch's resolution omitted them. An "all" package can
-// belong to one arch's build closure but not another's (e.g. an amd64-only
-// build-tooling dep that happens to ship as arch "all"), and FilesForArch feeds
-// every "all" file into EVERY arch's install set. Dropping an "all" entry during
-// a single-arch relock would therefore silently remove it from the OTHER arch's
-// effective set too — breaking that arch. So old "all" entries are preserved and
-// the fresh resolution's "all" pins are upserted over them (newest pin wins on a
-// version bump; no duplicates). Pruning an "all" package that no arch needs any
-// more requires re-locking every arch, which is the correct, explicit action.
-func writeBuildDeps(path, repoURL, snapshotBase string, packages []*index.Package) error {
-	// Concrete architectures this resolution covers; their old entries are
-	// replaced wholesale. "all" is deliberately excluded — see the doc comment.
-	coveredArch := make(map[string]bool)
-	for _, pkg := range packages {
-		if pkg.Architecture != "all" {
-			coveredArch[pkg.Architecture] = true
-		}
-	}
-
-	// Start from the existing lockfile (if any), dropping every file entry whose
-	// concrete arch this resolution covers. What remains are the other concrete
-	// architectures' pins plus every "all" pin — all of which must be preserved.
+// Arch-independent ("all") packages are resolved into more than one arch's set
+// (FetchBinaryIndex includes "all" packages in every arch's index, and
+// FilesForArch feeds every "all" file into every arch's install set). An "all"
+// package contributed by multiple arches collapses to a single file entry. Since
+// every arch is resolved in one pass against the same repo/dist/snapshot, those
+// contributions MUST agree byte-for-byte: if two arches pin the same "all"
+// package at a different version or sha256, that is a Packages-index
+// inconsistency and writeBuildDeps returns an error rather than silently picking
+// one.
+func writeBuildDeps(path, repoURL, snapshotBase string, perArch [][]*index.Package) error {
 	byName := make(map[string]*toolEntry)
 	var order []string
-	if existing, err := os.ReadFile(path); err == nil {
-		var old toolsDoc
-		if err := yaml.Unmarshal(existing, &old); err != nil {
-			return fmt.Errorf("parse existing lockfile %s for merge: %w", path, err)
-		}
-		for i := range old.Tools {
-			t := old.Tools[i]
-			var keep []fileEntry
-			for _, f := range t.Files {
-				if !coveredArch[f.Arch] {
-					keep = append(keep, f)
-				}
-			}
-			if len(keep) == 0 {
-				continue
-			}
-			kept := t
-			kept.Files = keep
-			byName[t.Name] = &kept
-			order = append(order, t.Name)
-		}
-	}
+	// Track, per "all" package name, the one file entry already recorded for it,
+	// so a second arch contributing the same "all" package can be verified
+	// identical rather than duplicated.
+	allSeen := make(map[string]fileEntry)
 
-	// Fold in the freshly resolved packages for the covered architectures.
-	for _, pkg := range packages {
-		if pkg.SHA256 == "" || pkg.Filename == "" {
-			return fmt.Errorf("package %s: missing hash or filename", pkg.Name)
-		}
-		if pkg.SHA1 == "" {
-			return fmt.Errorf("package %s: missing SHA1 (not fetched)", pkg.Name)
-		}
-		fe := fileEntry{
-			Arch:   pkg.Architecture,
-			SHA256: pkg.SHA256,
-			URLs: []string{
-				fmt.Sprintf("%s/%s", repoURL, pkg.Filename),
-				aptrepo.SnapshotURL(snapshotBase, pkg.SHA1, filepath.Base(pkg.Filename)),
-			},
-		}
-		if te, ok := byName[pkg.Name]; ok {
-			// Upsert by arch: a preserved "all" entry (never dropped above) must
-			// be replaced in place rather than duplicated when this resolution
-			// also pins the same "all" package. Concrete-arch entries for covered
-			// arches were already dropped, so this only matters for "all", but
-			// upserting by arch is correct and harmless in every case.
-			replaced := false
-			for i := range te.Files {
-				if te.Files[i].Arch == fe.Arch {
-					te.Files[i] = fe
-					replaced = true
-					break
+	for _, packages := range perArch {
+		for _, pkg := range packages {
+			if pkg.SHA256 == "" || pkg.Filename == "" {
+				return fmt.Errorf("package %s: missing hash or filename", pkg.Name)
+			}
+			if pkg.SHA1 == "" {
+				return fmt.Errorf("package %s: missing SHA1 (not fetched)", pkg.Name)
+			}
+			fe := fileEntry{
+				Arch:   pkg.Architecture,
+				SHA256: pkg.SHA256,
+				URLs: []string{
+					fmt.Sprintf("%s/%s", repoURL, pkg.Filename),
+					aptrepo.SnapshotURL(snapshotBase, pkg.SHA1, filepath.Base(pkg.Filename)),
+				},
+			}
+
+			if pkg.Architecture == "all" {
+				if prev, ok := allSeen[pkg.Name]; ok {
+					// Already recorded from another arch — must be identical.
+					if prev.SHA256 != fe.SHA256 || byName[pkg.Name].Version != pkg.Version {
+						return fmt.Errorf("arch-independent package %s resolved inconsistently across architectures: %s/%s vs %s/%s",
+							pkg.Name, byName[pkg.Name].Version, prev.SHA256, pkg.Version, fe.SHA256)
+					}
+					continue
 				}
+				allSeen[pkg.Name] = fe
 			}
-			if !replaced {
+
+			if te, ok := byName[pkg.Name]; ok {
 				te.Files = append(te.Files, fe)
+			} else {
+				byName[pkg.Name] = &toolEntry{
+					Name:    pkg.Name,
+					Version: pkg.Version,
+					Files:   []fileEntry{fe},
+				}
+				order = append(order, pkg.Name)
 			}
-			// Record the covered-arch version so the annotation reflects this
-			// resolution rather than a stale other-arch value.
-			te.Version = pkg.Version
-		} else {
-			byName[pkg.Name] = &toolEntry{
-				Name:    pkg.Name,
-				Version: pkg.Version,
-				Files:   []fileEntry{fe},
-			}
-			order = append(order, pkg.Name)
 		}
 	}
 
 	// Emit tools sorted by name, and each tool's files sorted by arch, so the
-	// lockfile is deterministic regardless of merge/resolution order.
+	// lockfile is deterministic regardless of resolution order.
 	sort.Strings(order)
 	doc := toolsDoc{Tools: make([]toolEntry, 0, len(order))}
 	for _, name := range order {
@@ -416,7 +389,7 @@ type RootfsConfig struct {
 	Store     *objstore.Store
 	RepoURL   string
 	Dist      string
-	Arch      string
+	Arches    []string
 	OutputDir string
 	Cookie    string
 
@@ -439,7 +412,7 @@ func GenerateRootfs(cfg RootfsConfig) (*Result, error) {
 		RepoURL:      cfg.RepoURL,
 		SnapshotBase: cfg.SnapshotBase,
 		Dist:         cfg.Dist,
-		Arch:         cfg.Arch,
+		Arches:       cfg.Arches,
 		Cookie:       cfg.Cookie,
 		DepsPath:     depsPath,
 	})
@@ -453,7 +426,7 @@ type ImageTypeConfig struct {
 	Store      *objstore.Store
 	RepoURL    string
 	Dist       string
-	Arch       string
+	Arches     []string
 	OutputDir  string
 	Cookie     string
 	TypeName   string   // images.d/<TypeName>/
@@ -467,7 +440,8 @@ type ImageTypeConfig struct {
 // explicit-YAML form as rootfs-deps.yml. local_tooling is not pinned here —
 // those are graph edges resolved through the build, not mirror pins.
 func GenerateImageType(cfg ImageTypeConfig) (*Result, error) {
-	applyRepoDefaults(&cfg.RepoURL, &cfg.Dist, &cfg.Arch, &cfg.Ctx)
+	applyRepoDefaults(&cfg.RepoURL, &cfg.Dist, &cfg.Ctx)
+	cfg.Arches = defaultArches(cfg.Arches)
 	depsPath := filepath.Join(cfg.OutputDir, "images.d", cfg.TypeName, "tooling-deps.yml")
 	return generateToolingLock(toolingLockConfig{
 		Ctx:          cfg.Ctx,
@@ -475,7 +449,7 @@ func GenerateImageType(cfg ImageTypeConfig) (*Result, error) {
 		RepoURL:      cfg.RepoURL,
 		SnapshotBase: cfg.SnapshotBase,
 		Dist:         cfg.Dist,
-		Arch:         cfg.Arch,
+		Arches:       cfg.Arches,
 		Cookie:       cfg.Cookie,
 		ExtraRoots:   cfg.ExtraRoots,
 		DepsPath:     depsPath,
@@ -491,35 +465,42 @@ type toolingLockConfig struct {
 	RepoURL      string
 	SnapshotBase string
 	Dist         string
-	Arch         string
+	Arches       []string
 	Cookie       string
 	ExtraRoots   []string
 	DepsPath     string
 }
 
-// generateToolingLock fetches the binary index, resolves the essential floor
-// plus any extra roots, fetches every .deb, and writes the explicit lock. It is
+// generateToolingLock fetches the binary index for every requested arch,
+// resolves the essential floor plus any extra roots per arch, fetches every
+// .deb, and writes the explicit lock wholesale over all arches at once. It is
 // the shared body of GenerateRootfs (no extra roots) and GenerateImageType
 // (debian_tooling appended).
 func generateToolingLock(cfg toolingLockConfig) (*Result, error) {
 	l := log.From(cfg.Ctx, log.Lockfile)
 
-	idx, err := FetchBinaryIndex(cfg.Ctx, cfg.Store, cfg.RepoURL, cfg.Dist, cfg.Arch, cfg.Cookie)
-	if err != nil {
-		return nil, fmt.Errorf("fetch binary index: %w", err)
+	var perArch [][]*index.Package
+	total := 0
+	for _, arch := range cfg.Arches {
+		idx, err := FetchBinaryIndex(cfg.Ctx, cfg.Store, cfg.RepoURL, cfg.Dist, arch, cfg.Cookie)
+		if err != nil {
+			return nil, fmt.Errorf("fetch binary index (%s): %w", arch, err)
+		}
+
+		roots := buildToolingRoots(idx, cfg.ExtraRoots)
+
+		packages, err := resolveAndFetch(cfg.Ctx, cfg.Store, l, idx, roots, arch, cfg.RepoURL)
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", arch, err)
+		}
+		perArch = append(perArch, packages)
+		total += len(packages)
 	}
 
-	roots := buildToolingRoots(idx, cfg.ExtraRoots)
-
-	packages, err := resolveAndFetch(cfg.Ctx, cfg.Store, l, idx, roots, cfg.Arch, cfg.RepoURL)
-	if err != nil {
-		return nil, err
-	}
-
-	if err := writeBuildDeps(cfg.DepsPath, cfg.RepoURL, cfg.SnapshotBase, packages); err != nil {
+	if err := writeBuildDeps(cfg.DepsPath, cfg.RepoURL, cfg.SnapshotBase, perArch); err != nil {
 		return nil, fmt.Errorf("write %s: %w", filepath.Base(cfg.DepsPath), err)
 	}
-	return &Result{Arch: cfg.Arch, Packages: len(packages), Path: cfg.DepsPath}, nil
+	return &Result{Arches: cfg.Arches, Packages: total, Path: cfg.DepsPath}, nil
 }
 
 // buildToolingRoots assembles the resolver roots for assembly/configuration
@@ -540,19 +521,30 @@ func buildToolingRoots(idx *index.Index, extra []string) []resolver.Requirement 
 	return roots
 }
 
-func applyRepoDefaults(repoURL, dist, arch *string, ctx *context.Context) {
+func applyRepoDefaults(repoURL, dist *string, ctx *context.Context) {
 	if *repoURL == "" {
 		*repoURL = "https://deb.debian.org/debian"
 	}
 	if *dist == "" {
 		*dist = "testing"
 	}
-	if *arch == "" {
-		*arch = buildcfg.HostArch()
-	}
 	if *ctx == nil {
 		*ctx = context.Background()
 	}
+}
+
+// DefaultArches is the architecture set a lock covers when none is specified:
+// every target architecture the project currently builds for. It mirrors the
+// default in staging's generate-workflow.sh (ARCHES="${ARCHES:-amd64 arm64}").
+// Hardcoded for now; a future change may derive it from the config repo.
+var DefaultArches = []string{"amd64", "arm64"}
+
+// defaultArches returns arches unchanged, or DefaultArches when empty.
+func defaultArches(arches []string) []string {
+	if len(arches) == 0 {
+		return append([]string(nil), DefaultArches...)
+	}
+	return arches
 }
 
 // FetchDebs downloads and hash-verifies every package's .deb into the store,

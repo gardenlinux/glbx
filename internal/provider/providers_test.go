@@ -39,11 +39,11 @@ func TestParseTarget(t *testing.T) {
 }
 
 func TestParseParams(t *testing.T) {
-	p, err := ParseParams([]string{"repo=http://x,dist=testing", "arch=amd64"})
+	p, err := ParseParams([]string{"repo=http://x,dist=testing", "cookie=sess1"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if p["repo"] != "http://x" || p["dist"] != "testing" || p["arch"] != "amd64" {
+	if p["repo"] != "http://x" || p["dist"] != "testing" || p["cookie"] != "sess1" {
 		t.Fatalf("unexpected params: %+v", p)
 	}
 
@@ -82,24 +82,25 @@ func TestDebianRepoConfigDefaults(t *testing.T) {
 	if cfg.Snapshot == "" {
 		t.Error("default snapshot should be set")
 	}
-	if cfg.Arch == "" {
-		t.Error("default arch should be the host arch")
+	// GenArch defaults to the host arch (control generation is arch-neutral and
+	// runs natively); GenRepo/GenDist mirror the resolved base.
+	if cfg.GenArch == "" {
+		t.Error("default gen-arch should be the host arch")
 	}
-	// Gen* default to the resolved base.
-	if cfg.GenRepo != cfg.Repo || cfg.GenDist != cfg.Dist || cfg.GenArch != cfg.Arch {
+	if cfg.GenRepo != cfg.Repo || cfg.GenDist != cfg.Dist {
 		t.Errorf("gen defaults should mirror base: %+v", cfg)
 	}
 }
 
 func TestDebianRepoConfigOverrides(t *testing.T) {
 	cfg, err := debianRepoConfig(Params{
-		"repo": "http://snap", "dist": "sid", "arch": "arm64",
+		"repo": "http://snap", "dist": "sid",
 		"no-verify": "true", "gen-arch": "amd64",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.Repo != "http://snap" || cfg.Dist != "sid" || cfg.Arch != "arm64" {
+	if cfg.Repo != "http://snap" || cfg.Dist != "sid" || cfg.GenArch != "amd64" {
 		t.Errorf("overrides not applied: %+v", cfg)
 	}
 	if !cfg.NoVerify {
@@ -120,6 +121,10 @@ func TestDebianRepoConfigRejectsUnknownKey(t *testing.T) {
 	}
 	if _, err := debianRepoConfig(Params{"no-verify": "maybe"}); err == nil {
 		t.Fatal("expected an error for a non-boolean no-verify")
+	}
+	// arch is no longer a param — target arches come from --architectures.
+	if _, err := debianRepoConfig(Params{"arch": "amd64"}); err == nil {
+		t.Fatal("expected an error: arch is not a debian-family param anymore")
 	}
 }
 

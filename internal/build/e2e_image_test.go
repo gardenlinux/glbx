@@ -58,7 +58,7 @@ func TestImageBuildE2E(t *testing.T) {
 
 	writeTrivialPackage(t, filepath.Join(work, "pkgs"), "glbxtest")
 
-	if _, err := lockfile.Generate(lockfile.Config{Ctx: ctx, Store: store, Arch: arch, OutputDir: work, PkgName: "glbxtest", Cookie: cookie}); err != nil {
+	if _, err := lockfile.Generate(lockfile.Config{Ctx: ctx, Store: store, Arches: []string{arch}, OutputDir: work, PkgName: "glbxtest", Cookie: cookie}); err != nil {
 		t.Skipf("lockfile (network required): %v", err)
 	}
 
@@ -66,7 +66,7 @@ func TestImageBuildE2E(t *testing.T) {
 	// A second variant sharing the same (single) package exercises multi-root
 	// discovery: two rootfs nodes over one dependency closure.
 	os.WriteFile(filepath.Join(work, "rootfs-min.yml"), []byte("packages:\n  - glbxtest:glbxtest\n"), 0644)
-	if _, err := lockfile.GenerateRootfs(lockfile.RootfsConfig{Ctx: ctx, Store: store, Arch: arch, OutputDir: work, Cookie: cookie}); err != nil {
+	if _, err := lockfile.GenerateRootfs(lockfile.RootfsConfig{Ctx: ctx, Store: store, Arches: []string{arch}, OutputDir: work, Cookie: cookie}); err != nil {
 		t.Skipf("rootfs lockfile (network required): %v", err)
 	}
 

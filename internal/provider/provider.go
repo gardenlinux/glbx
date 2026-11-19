@@ -36,6 +36,12 @@ type OpContext struct {
 	OutputDir string // working-tree root
 	Params    Params
 	StubPath  string
+
+	// Arches is the set of target architectures a lock generator covers in one
+	// wholesale pass. Set from `glbx lockfile --architectures`; empty means the
+	// lockfile package applies its own default (lockfile.DefaultArches). Ignored
+	// by providers that are not lock generators.
+	Arches []string
 }
 
 // Importer fetches an upstream package's pristine source into the working tree

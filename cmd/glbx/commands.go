@@ -38,6 +38,7 @@ func cmdLockfile(args []string) error {
 	var params repeatedFlag
 	fs.Var(&params, "params", "provider parameters as key=val,key=val (repeatable); see --params-help <namespace>")
 	paramsHelp := fs.String("params-help", "", "print the parameters a namespace accepts and exit")
+	architectures := fs.String("architectures", "amd64,arm64", "comma-separated target architectures to lock, written wholesale in one pass")
 	cacheDir := fs.String("cache", "", "object-store cache directory")
 	outputDir := fs.String("output", ".", "working-tree root")
 	stubPath := fs.String("stub", "", "path to exec_env_stub binary (for container-backed providers)")
@@ -69,6 +70,11 @@ func cmdLockfile(args []string) error {
 		return err
 	}
 
+	arches, err := parseArches(*architectures)
+	if err != nil {
+		return err
+	}
+
 	store, err := openStore(*cacheDir)
 	if err != nil {
 		return fmt.Errorf("open store: %w", err)
@@ -81,7 +87,30 @@ func cmdLockfile(args []string) error {
 		OutputDir: *outputDir,
 		Params:    parsedParams,
 		StubPath:  *stubPath,
+		Arches:    arches,
 	}, target.Arg)
+}
+
+// parseArches splits a comma-separated --architectures value into a cleaned,
+// non-empty, duplicate-free list, preserving order.
+func parseArches(s string) ([]string, error) {
+	var out []string
+	seen := make(map[string]bool)
+	for _, a := range strings.Split(s, ",") {
+		a = strings.TrimSpace(a)
+		if a == "" {
+			continue
+		}
+		if seen[a] {
+			continue
+		}
+		seen[a] = true
+		out = append(out, a)
+	}
+	if len(out) == 0 {
+		return nil, fmt.Errorf("--architectures must name at least one architecture")
+	}
+	return out, nil
 }
 
 func cmdStatus(args []string) error {

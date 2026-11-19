@@ -31,7 +31,9 @@ func (debianKernelLock) Namespace() string { return "debian-kernel" }
 func (debianKernelLock) ParamsHelp() string {
 	return `gen-repo      APT repository for the gen-control container; default = repo
 gen-dist      distribution for the gen-control container; default = dist
-gen-arch      architecture for the gen-control container; default = arch
+gen-arch      architecture for the gen-control container; default = host arch
+              (control generation is arch-neutral, so it runs natively
+              regardless of which arches --architectures locks)
 
 (all debian lockfile params are inherited and apply to the resolved lock)`
 }

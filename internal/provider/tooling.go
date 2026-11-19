@@ -2,6 +2,7 @@ package provider
 
 import (
 	"path/filepath"
+	"strings"
 
 	"github.com/gardenlinux/glbx/internal/buildcfg"
 	"github.com/gardenlinux/glbx/internal/importer"
@@ -103,7 +104,7 @@ func (toolingPkgLock) Generate(op OpContext, arg string) error {
 		RepoURL:      cfg.Repo,
 		SnapshotBase: cfg.Snapshot,
 		Dist:         cfg.Dist,
-		Arch:         cfg.Arch,
+		Arches:       op.Arches,
 		OutputDir:    op.OutputDir,
 		PkgName:      arg,
 		SubDir:       toolingSubDir,
@@ -112,7 +113,7 @@ func (toolingPkgLock) Generate(op OpContext, arg string) error {
 	if err != nil {
 		return err
 	}
-	log.From(op.Ctx, log.Lockfile).Info("generated %s (%s): %d packages", result.Path, result.Arch, result.Packages)
+	log.From(op.Ctx, log.Lockfile).Info("generated %s (%s): %d packages", result.Path, strings.Join(result.Arches, ","), result.Packages)
 	return nil
 }
 
@@ -143,7 +144,7 @@ func (imageTypeLock) Generate(op OpContext, arg string) error {
 		RepoURL:      cfg.Repo,
 		SnapshotBase: cfg.Snapshot,
 		Dist:         cfg.Dist,
-		Arch:         cfg.Arch,
+		Arches:       op.Arches,
 		OutputDir:    op.OutputDir,
 		Cookie:       cfg.Cookie,
 		TypeName:     arg,
@@ -152,6 +153,6 @@ func (imageTypeLock) Generate(op OpContext, arg string) error {
 	if err != nil {
 		return err
 	}
-	log.From(op.Ctx, log.Lockfile).Info("generated %s (%s): %d packages", result.Path, result.Arch, result.Packages)
+	log.From(op.Ctx, log.Lockfile).Info("generated %s (%s): %d packages", result.Path, strings.Join(result.Arches, ","), result.Packages)
 	return nil
 }

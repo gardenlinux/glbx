@@ -158,11 +158,14 @@ namespace (`provider.LookupLockGenerator` + `provider.ParseTarget`). The target 
 `--params`/`--params-help <ns>` as for `import`. `--output <dir>` is the
 working-tree root (default `.`). `--stub` supplies the `exec_env_stub` path, which
 only a container-backed generator (`debian-kernel`) needs. `--cache` as usual.
-`lockfile` has **no** `--arch` flag: the target architecture is a provider
-parameter (`--params arch=<arch>`, default the host arch). One invocation locks
-one architecture and the writer merges it into any existing lock, so a
-multi-architecture lockfile is produced by running the command once per
-architecture (see [package-build](../concepts/package-build.md#one-run-locks-one-architecture-and-merges)).
+Target architecture is **not** a provider parameter: `--architectures`
+(comma-separated, default `amd64,arm64`) selects every arch the lock covers, and
+one invocation resolves all of them and writes the lock **wholesale** — the file
+already on disk is ignored, not merged (see
+[package-build](../concepts/package-build.md#one-run-locks-every-architecture-wholesale)).
+`--architectures amd64` is the single-arch fast path for a quick local pass. The
+`debian-kernel` control-generation container always runs on the host-native arch
+(`gen-arch` param, default host arch), regardless of which arches are locked.
 
 ### `build` — `build.go`, `reproducible.go`
 
